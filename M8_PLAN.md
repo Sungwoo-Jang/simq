@@ -1,6 +1,6 @@
 # M8 implementation plan
 
-Status: implementation complete; PR delivery pending.
+Status: complete.
 
 M8 adds resumable, epoch-fenced relocation of a complete tenant between two
 existing M7 shards. The fixed shard-ID catalog remains unchanged: adding or
@@ -49,8 +49,7 @@ durable phase and idempotent next action.
 - [x] M8-H: Add storage, routing, API, restart, and three-node/two-shard FIFO
   relocation tests.
 - [x] M8-I: Update status, task, and tenant-relocation operations documentation.
-- [ ] M8-J: Go 1.26.7 verification passed; push the feature branch and deliver
-  it through a PR once non-interactive GitHub authentication is available.
+- [x] M8-J: Pass the Go 1.26.7 verification gate and deliver through a PR.
 
 ## Safety boundaries
 
