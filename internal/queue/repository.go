@@ -4,30 +4,36 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"simq/internal/ownership"
 )
 
 var (
-	ErrQueueAlreadyExists     = errors.New("queue already exists with different attributes")
-	ErrQueueDoesNotExist      = errors.New("queue does not exist")
-	ErrMessageIDExists        = errors.New("message ID already exists")
-	ErrMessageIDUnavailable   = errors.New("could not allocate a unique message ID")
-	ErrQueueIDUnavailable     = errors.New("could not allocate a unique queue ID")
-	ErrReceiptHandleExists    = errors.New("receipt handle already exists")
-	ErrReceiptUnavailable     = errors.New("could not allocate a unique receipt handle")
-	ErrReceiptHandleIsInvalid = errors.New("receipt handle is invalid")
-	ErrInvalidPaginationToken = errors.New("pagination token is invalid or expired")
-	ErrOverLimit              = errors.New("administrative metadata limit exceeded")
-	ErrQueueInUse             = errors.New("queue is in use by redrive configuration")
-	ErrMoveTaskAlreadyRunning = errors.New("a message move task is already running")
-	ErrMoveTaskNotRunning     = errors.New("message move task is not running")
-	ErrMoveTaskDoesNotExist   = errors.New("message move task does not exist")
-	ErrQueueIsNotDeadLetter   = errors.New("queue is not configured as a dead-letter queue")
-	ErrRepositoryUnavailable  = errors.New("repository is unavailable")
-	ErrServiceShuttingDown    = fmt.Errorf("%w: service is shutting down", ErrRepositoryUnavailable)
-	ErrRepositoryClosed       = fmt.Errorf("%w: repository is closed", ErrRepositoryUnavailable)
-	ErrRepositoryCorrupt      = fmt.Errorf("%w: repository is corrupt or incompatible", ErrRepositoryUnavailable)
-	ErrTenantRequired         = errors.New("authenticated tenant is required")
-	ErrQuotaExceeded          = errors.New("tenant storage quota exceeded")
+	ErrQueueAlreadyExists      = errors.New("queue already exists with different attributes")
+	ErrQueueDoesNotExist       = errors.New("queue does not exist")
+	ErrMessageIDExists         = errors.New("message ID already exists")
+	ErrMessageIDUnavailable    = errors.New("could not allocate a unique message ID")
+	ErrQueueIDUnavailable      = errors.New("could not allocate a unique queue ID")
+	ErrReceiptHandleExists     = errors.New("receipt handle already exists")
+	ErrReceiptUnavailable      = errors.New("could not allocate a unique receipt handle")
+	ErrReceiptHandleIsInvalid  = errors.New("receipt handle is invalid")
+	ErrInvalidPaginationToken  = errors.New("pagination token is invalid or expired")
+	ErrOverLimit               = errors.New("administrative metadata limit exceeded")
+	ErrQueueInUse              = errors.New("queue is in use by redrive configuration")
+	ErrMoveTaskAlreadyRunning  = errors.New("a message move task is already running")
+	ErrMoveTaskNotRunning      = errors.New("message move task is not running")
+	ErrMoveTaskDoesNotExist    = errors.New("message move task does not exist")
+	ErrQueueIsNotDeadLetter    = errors.New("queue is not configured as a dead-letter queue")
+	ErrRepositoryUnavailable   = errors.New("repository is unavailable")
+	ErrServiceShuttingDown     = fmt.Errorf("%w: service is shutting down", ErrRepositoryUnavailable)
+	ErrRepositoryClosed        = fmt.Errorf("%w: repository is closed", ErrRepositoryUnavailable)
+	ErrRepositoryCorrupt       = fmt.Errorf("%w: repository is corrupt or incompatible", ErrRepositoryUnavailable)
+	ErrTenantRequired          = errors.New("authenticated tenant is required")
+	ErrQuotaExceeded           = errors.New("tenant storage quota exceeded")
+	ErrTenantMigrating         = fmt.Errorf("%w: tenant migration is in progress", ErrRepositoryUnavailable)
+	ErrTenantOwnershipConflict = errors.New("tenant ownership epoch or shard conflicts with the requested transition")
+	ErrMigrationDoesNotExist   = errors.New("tenant migration does not exist")
+	ErrMigrationAlreadyExists  = errors.New("tenant migration already exists")
 )
 
 type Repository interface {
@@ -111,6 +117,15 @@ type ShardAdminRepository interface {
 	DemoteShardVoter(string, string) error
 	RemoveShardServer(string, string) error
 	TriggerShardSnapshot(string) error
+}
+
+type TenantMigrationAdminRepository interface {
+	Repository
+	BeginTenantMigration(string, string, string) (ownership.Migration, error)
+	TenantMigrationStatus(string) (ownership.Status, error)
+	ListTenantMigrations(int) ([]ownership.Migration, error)
+	AdvanceTenantMigration(string) (ownership.Status, error)
+	AbortTenantMigration(string) (ownership.Status, error)
 }
 
 type TenantScopedRepository interface {

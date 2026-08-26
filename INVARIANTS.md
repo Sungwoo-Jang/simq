@@ -826,7 +826,53 @@ Placement edits may not add or remove shard IDs, change the default shard, or
 move existing tenants under the same catalog revision. Storage-key copying MUST
 NOT substitute for a versioned, fenced ownership-transfer protocol.
 
-## 19. Required M0 evidence
+## 19. Tenant relocation invariants
+
+### REL-001: Ownership epochs are monotonic and authoritative
+
+An explicit tenant ownership record MUST override hashing. Cutover MUST compare
+the exact source shard and epoch and advance the epoch by exactly one.
+
+### REL-002: At most one shard can write one tenant epoch
+
+The source MUST commit a durable fence before destination ownership can commit.
+The destination MUST NOT serve while merely prepared. Routing lag may reject
+requests but MUST NOT permit concurrent source and destination writers.
+
+### REL-003: Every data access checks the local fence
+
+Foreground reads and mutations plus expiry and move workers MUST reject or skip
+a tenant whose local state is frozen, prepared, moved, or at the wrong epoch.
+
+### REL-004: Freeze and capture are atomic
+
+The final source bundle MUST describe the same transaction that installs the
+source fence. No acknowledged mutation may fall between that bundle and fence.
+
+### REL-005: Tenant bundles are complete, canonical, and bounded
+
+A bundle MUST include every authoritative tenant record and no record belonging
+to another tenant. Canonical ordering and SHA-256 MUST detect omissions or
+changes. Oversized, duplicate, malformed, or conflicting imports fail entirely.
+
+### REL-006: Cutover is explicit, never inferred
+
+Copied or prepared data MUST NOT change routing. Only the control Raft group's
+compare-and-swap ownership commit changes the authoritative shard.
+
+### REL-007: Every phase is crash-recoverable and idempotent
+
+After any process, leader, or minority failure, retrying the recorded next phase
+MUST either make progress once or return its already-completed result. Abort is
+permitted only before cutover.
+
+### REL-008: The tenant remains the atomic relocation unit
+
+Queues, FIFO groups, redrive edges, move tasks, receipts, quotas, and encrypted
+payloads for one tenant MUST move together. M8 MUST NOT split queues across
+shards or decrypt payloads during transfer.
+
+## 20. Required M0 evidence
 
 M0 MUST include automated evidence for at least the following cases:
 
@@ -850,7 +896,7 @@ go test ./...
 go test -race ./...
 ```
 
-## 20. Required M1-B evidence
+## 21. Required M1-B evidence
 
 M1-B MUST add automated evidence for at least the following cases:
 
@@ -874,7 +920,7 @@ unissued, cross-queue, receive/change race, and delete/change race cases against
 both the memory and bbolt repositories. Timing proofs use explicit timestamps or
 injected clocks and never correctness sleeps.
 
-## 21. Required M1-D evidence
+## 22. Required M1-D evidence
 
 M1-D MUST add automated evidence for at least the following cases:
 
@@ -901,7 +947,7 @@ injected clock. Migration fixtures MUST prove that pre-existing lifecycle and
 receipt data are semantically unchanged apart from record-version and newly
 initialized attribute fields.
 
-## 22. Required M1-E evidence
+## 23. Required M1-E evidence
 
 M1-E MUST add automated evidence for at least the following cases:
 
@@ -924,7 +970,7 @@ Long-poll timing tests use an injected service clock and controllable timer.
 They do not use sleeps as correctness evidence. The shared repository suite
 checks lifecycle transition hints against both memory and bbolt.
 
-## 23. Required M1-F evidence
+## 24. Required M1-F evidence
 
 M1-F MUST add automated evidence for at least the following cases:
 
@@ -946,7 +992,7 @@ Batch conformance MUST execute the same semantic suite against memory and bbolt.
 Failure tests MUST distinguish request-level no-mutation errors from HTTP 200
 entry-level results. No test may infer batch-wide atomicity or exactly-once retry.
 
-## 24. Required M3 evidence
+## 25. Required M3 evidence
 
 M3 MUST add automated evidence for at least the following cases:
 
@@ -964,7 +1010,7 @@ M3 MUST add automated evidence for at least the following cases:
 | Strict HTTP shapes and errors expose no message, receipt, task internals, or path | API-001–API-004, API-007, SEC-001–SEC-003 |
 | Race detector covers policy, receive transfer, cancellation, and worker progress | CON-001, DLQ-001–DLQ-004 |
 
-## 25. Required M7 evidence
+## 26. Required M7 evidence
 
 M7 MUST add automated evidence for at least the following cases:
 
@@ -978,7 +1024,22 @@ M7 MUST add automated evidence for at least the following cases:
 | Three nodes host two Raft groups and both preserve FIFO after one node fails | FIFO-001–FIFO-004, CLU-004, SHD-003, SHD-004 |
 | Tenant delete uses the public queue generation while receipts remain scoped | QUEUE-007, RCP-001–RCP-003, SHD-003 |
 
-## 26. Forbidden implementation shortcuts
+## 27. Required M8 evidence
+
+M8 MUST add automated evidence for at least the following cases:
+
+| Test scenario | Invariants demonstrated |
+|---|---|
+| Schema-v9 state migrates with a validated backup and snapshot round-trip | DUR-003–DUR-006, REL-001, REL-007 |
+| Source freeze and bundle capture reject concurrent foreground mutation | CON-001, REL-002–REL-004 |
+| A complete Standard/FIFO/redrive tenant bundle contains no other tenant | SEC-006, REL-005, REL-008 |
+| Prepared destination remains unreadable before ownership CAS | REL-002, REL-006 |
+| Stale source routing after cutover cannot read or write | CLU-010, REL-001–REL-003 |
+| Retry after every phase crash reaches one completed ownership epoch | CLU-007, REL-006, REL-007 |
+| Pre-cutover abort restores only the original source epoch | REL-001, REL-002, REL-007 |
+| Three-node/two-shard FIFO relocation preserves order across leader failure | FIFO-001–FIFO-004, CLU-004, REL-002, REL-008 |
+
+## 28. Forbidden implementation shortcuts
 
 The following approaches violate this document unless the specification is
 explicitly changed:
@@ -1014,8 +1075,12 @@ explicitly changed:
   source fencing, verified cutover, and rollback.
 - Applying a per-shard membership change without checking the planned address,
   voter floor, and failure-domain quorum result.
+- Serving a prepared tenant before the control ownership compare-and-swap.
+- Unfreezing a source after ownership has committed to the destination.
+- Capturing tenant data before the durable source fence in a different
+  transaction.
 
-## 27. Changing an invariant
+## 29. Changing an invariant
 
 An invariant may change only when all of the following are present:
 

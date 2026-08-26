@@ -50,8 +50,8 @@ leader-only:
 - `GET /v1/cluster/members`
 - `GET /v1/cluster/protocol`
 - `POST /v1/cluster/members` with
-  `{"Action":"add-nonvoter|add-voter|demote|remove","NodeId":"...","RaftAddress":"...","MinCommandVersion":1,"MaxCommandVersion":1}`.
-  The version fields are required for add operations and must overlap version 1.
+  `{"Action":"add-nonvoter|add-voter|demote|remove","NodeId":"...","RaftAddress":"...","MinCommandVersion":2,"MaxCommandVersion":2}`.
+  The version fields are required for add operations and must overlap version 2.
 - `POST /v1/cluster/snapshot`
 
 For replacement or expansion, add a nonvoter, wait until it is caught up, then
@@ -59,7 +59,7 @@ promote it with `add-voter`. Preserve an odd voter count and quorum throughout.
 Demote or remove only after the replacement is a voter. SimQ delegates every
 configuration change to HashiCorp Raft and never edits peer state directly.
 
-M5 command protocol version 1 is the only supported clustered command version.
-All nodes in an M5 cluster therefore need a build supporting version 1. A future
+M8 command protocol version 2 is the only supported clustered command version.
+All nodes in an M8 cluster therefore need a build supporting version 2. A future
 release must advertise an overlapping command-version range before mixed-version
 rolling upgrades can be allowed.

@@ -9,14 +9,14 @@ Only behavior backed by automated evidence may be marked complete.
 
 | Dimension | Status | Current boundary |
 |---|---|---|
-| Queue model | complete through M7 | Standard and FIFO semantics preserved on standalone, one Raft group, or a fixed tenant shard |
+| Queue model | complete through M8 | Standard and FIFO semantics preserved on standalone, one Raft group, or an epoch-owned tenant shard |
 | Public actions | complete through M4 | All 23 planned SQS-named JSON actions plus FIFO fields are implemented |
-| Durability | complete through M7 | Schema-v9 catalog-bound bbolt state and durable quorum commit per independent shard |
+| Durability | complete through M8 | Schema-v10 catalog-bound bbolt state, ownership epochs, and durable quorum commit per independent shard |
 | High availability | complete per fixed shard | Three or more voters tolerate one-node failure; placement rejects a single-domain quorum |
-| Multi-tenancy | complete for fixed sharding | Verified tenant digest maps deterministically to one non-aliasing shard namespace |
+| Multi-tenancy | complete for fixed-catalog relocation | Verified tenant digest has one epoch-owned, non-aliasing shard namespace |
 | Authentication and authorization | complete | Strict OIDC RS256 verification and fixed deny-by-default SimQ roles |
 | Encryption | complete for payloads and transport | AES-256-GCM message envelopes, TLS 1.3 API, and optional Raft mTLS |
-| Operations | complete for M7 boundary | Per-shard status, leader hints, safe membership, snapshots, relocation, and recovery runbook |
+| Operations | complete for M8 boundary | Per-shard operations plus resumable tenant relocation, abort, leader hints, and recovery runbooks |
 
 ## API coverage
 
@@ -63,10 +63,10 @@ Only behavior backed by automated evidence may be marked complete.
 | FIFO transfers | complete | DLQ and move transitions preserve group metadata and atomically resequence in the destination generation |
 | Process-crash recovery | complete | Unix SIGKILL and Windows test-child forced exit reopen the same bbolt file; batch send, visibility, and delete are covered |
 | Fail-closed corruption policy | complete | Invalid schema or records cause explicit failure |
-| Schema migration | complete for v1/v2/v3/v4/v5/v6/v7/v8→v9 | Sequential startup migration preserves validated `0600` backups for every source version |
-| Backup and restore | complete for per-shard clustered snapshots | Complete schema-v9 catalog-bound FSM snapshots validate before atomic publication; standalone export tooling remains deferred |
+| Schema migration | complete for v1/v2/v3/v4/v5/v6/v7/v8/v9→v10 | Sequential startup migration preserves validated `0600` backups for every source version |
+| Backup and restore | complete for per-shard clustered snapshots | Complete schema-v10 catalog-bound FSM snapshots include relocation state and validate before atomic publication; standalone export tooling remains deferred |
 | Online migration and compaction | partial | Schema migration is offline; Raft snapshots compact replicated logs automatically |
-| Replication and consensus | complete for fixed multi-Raft groups | Independent durable logs, quorums, linearizable leader reads, failover, and minority fencing per shard |
+| Replication and consensus | complete for fixed multi-Raft groups | Independent durable logs, quorums, linearizable leader reads, failover, minority fencing, and resumable cross-group relocation |
 
 ## Security and isolation
 
@@ -98,7 +98,7 @@ purged before enabling OIDC mode and otherwise fail closed.
 | Alerting | planned | No SLO or alert rules |
 | Audit logging | complete | Synchronized redacted JSONL sink with hashed tenant and issuer-subject identity |
 | Web/admin dashboard | planned | Build after authoritative metrics and access control exist |
-| Horizontal scaling | complete for fixed tenant sharding | Every node hosts the configured groups; tenant traffic is split across independent shard leaders |
+| Horizontal scaling | complete for fixed-catalog tenant sharding | Every node hosts configured groups; tenant ownership can move online between existing shard IDs |
 | Automated failover | complete for M5 | Raft elects a new leader; followers return configured API leader hints |
 | Multi-AZ durability | complete at placement-policy boundary | Initial and changed voter sets reject any one failure domain containing quorum; deployment supplies real domains |
 
@@ -119,6 +119,7 @@ purged before enabling OIDC mode and otherwise fail closed.
 | M5 | complete | Deterministic replication, durable quorum commit, failover, snapshots, membership, and strict leader routing |
 | M6 | complete | Authentication, tenancy, encryption, quotas, rate limiting, metrics, audit, TLS, and product operations |
 | M7 | complete | Fixed catalog, tenant rendezvous routing, independent Raft shards, safe placement, relocation, and per-shard recovery |
+| M8 | complete | Epoch-fenced tenant relocation, bounded verified transfer, resumable cutover/abort, and leader-failure recovery |
 
 ## Update rules
 

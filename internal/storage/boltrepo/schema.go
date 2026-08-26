@@ -11,11 +11,13 @@ import (
 
 	bolt "go.etcd.io/bbolt"
 
+	"simq/internal/ownership"
 	"simq/internal/queue"
 )
 
 const (
-	schemaVersion       uint32 = 9
+	schemaVersion       uint32 = 10
+	schemaVersionV9     uint32 = 9
 	schemaVersionV8     uint32 = 8
 	schemaVersionV7     uint32 = 7
 	schemaVersionV6     uint32 = 6
@@ -47,6 +49,10 @@ var (
 	fifoAttemptsBucket         = []byte("fifo_attempts")
 	replicationProposalsBucket = []byte("replication_proposals")
 	tenantUsageBucket          = []byte("tenant_usage")
+	tenantOwnershipBucket      = []byte("tenant_ownership")
+	tenantMigrationsBucket     = []byte("tenant_migrations")
+	tenantFencesBucket         = []byte("tenant_fences")
+	tenantBundlesBucket        = []byte("tenant_bundles")
 	schemaVersionKey           = []byte("schema_version")
 	installationIDKey          = []byte("installation_id")
 	namespaceRevisionKey       = []byte("namespace_revision")
@@ -59,7 +65,8 @@ var (
 	requiredBucketsV5          = [][]byte{metadataBucket, queuesBucket, messagesBucket, messageOrderBucket, messageIDsBucket, receiptsBucket, queueIdentitiesBucket, queueTagsBucket, queuePermissionsBucket, queueTombstonesBucket, redrivePoliciesBucket, redriveOriginsBucket, moveTasksBucket}
 	requiredBucketsV6          = [][]byte{metadataBucket, queuesBucket, messagesBucket, messageOrderBucket, messageIDsBucket, receiptsBucket, queueIdentitiesBucket, queueTagsBucket, queuePermissionsBucket, queueTombstonesBucket, redrivePoliciesBucket, redriveOriginsBucket, moveTasksBucket, fifoQueuesBucket, fifoSequencesBucket, fifoMessagesBucket, fifoDedupBucket, fifoAttemptsBucket}
 	requiredBucketsV7          = append(append([][]byte(nil), requiredBucketsV6...), replicationProposalsBucket)
-	requiredBuckets            = append(append([][]byte(nil), requiredBucketsV7...), tenantUsageBucket)
+	requiredBucketsV9          = append(append([][]byte(nil), requiredBucketsV7...), tenantUsageBucket)
+	requiredBuckets            = append(append([][]byte(nil), requiredBucketsV9...), tenantOwnershipBucket, tenantMigrationsBucket, tenantFencesBucket, tenantBundlesBucket)
 )
 
 func initializeSchema(tx *bolt.Tx, installationID string) error {
@@ -126,11 +133,36 @@ func validateTransaction(tx *bolt.Tx) error {
 	if err := validateReplicationState(tx); err != nil {
 		return err
 	}
-	return validateTenantUsage(tx)
+	if err := validateTenantUsage(tx); err != nil {
+		return err
+	}
+	return validateTenantRelocation(tx)
 }
 
 func validateTransactionV8(tx *bolt.Tx) error {
-	if err := validateSchemaEnvelope(tx, requiredBuckets, schemaVersionV8, true); err != nil {
+	if err := validateSchemaEnvelope(tx, requiredBucketsV9, schemaVersionV8, true); err != nil {
+		return err
+	}
+	if err := validateDataBuckets(tx); err != nil {
+		return err
+	}
+	if err := validateAdministrationBuckets(tx); err != nil {
+		return err
+	}
+	if err := validateRedriveBuckets(tx); err != nil {
+		return err
+	}
+	if err := validateFIFOBuckets(tx); err != nil {
+		return err
+	}
+	if err := validateReplicationState(tx); err != nil {
+		return err
+	}
+	return validateTenantUsage(tx)
+}
+
+func validateTransactionV9(tx *bolt.Tx) error {
+	if err := validateSchemaEnvelope(tx, requiredBucketsV9, schemaVersionV9, true); err != nil {
 		return err
 	}
 	if err := validateDataBuckets(tx); err != nil {
@@ -271,7 +303,7 @@ func validateSchemaEnvelope(tx *bolt.Tx, buckets [][]byte, expectedVersion uint3
 			}
 			return corruptf("metadata contains unknown key %q", key)
 		case string(shardCatalogRevisionKey):
-			if expectedVersion >= schemaVersion {
+			if expectedVersion >= schemaVersionV9 {
 				return nil
 			}
 			return corruptf("metadata contains unknown key %q", key)
@@ -307,17 +339,82 @@ func validateSchemaEnvelope(tx *bolt.Tx, buckets [][]byte, expectedVersion uint3
 			return corruptf("applied Raft index is missing or malformed")
 		}
 		protocol := metadata.Get(commandProtocolVersionKey)
-		if len(protocol) != 4 || binary.BigEndian.Uint32(protocol) != replicatedCommandProtocolVersion {
+		expectedProtocol := replicatedCommandProtocolVersionV1
+		if expectedVersion >= schemaVersion {
+			expectedProtocol = replicatedCommandProtocolVersion
+		}
+		if len(protocol) != 4 || binary.BigEndian.Uint32(protocol) != expectedProtocol {
 			return corruptf("command protocol version is missing or unsupported")
 		}
 	}
 	if revision := metadata.Get(shardCatalogRevisionKey); revision != nil {
 		decoded, err := hex.DecodeString(string(revision))
-		if expectedVersion < schemaVersion || err != nil || len(decoded) != 16 || string(revision) != strings.ToLower(string(revision)) {
+		if expectedVersion < schemaVersionV9 || err != nil || len(decoded) != 16 || string(revision) != strings.ToLower(string(revision)) {
 			return corruptf("shard catalog revision is malformed or unsupported")
 		}
 	}
 	return nil
+}
+
+func validateTenantRelocation(tx *bolt.Tx) error {
+	if err := tx.Bucket(tenantOwnershipBucket).ForEach(func(key, encoded []byte) error {
+		if encoded == nil {
+			return corruptf("tenant ownership contains a nested bucket")
+		}
+		var record ownership.Record
+		if err := decodeRecord(encoded, &record); err != nil {
+			return err
+		}
+		if string(key) != record.TenantDigest || record.Validate() != nil {
+			return corruptf("tenant ownership record is invalid")
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := tx.Bucket(tenantMigrationsBucket).ForEach(func(key, encoded []byte) error {
+		if encoded == nil {
+			return corruptf("tenant migrations contains a nested bucket")
+		}
+		var record ownership.Migration
+		if err := decodeRecord(encoded, &record); err != nil {
+			return err
+		}
+		if string(key) != record.ID || record.Validate() != nil {
+			return corruptf("tenant migration record is invalid")
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := tx.Bucket(tenantFencesBucket).ForEach(func(key, encoded []byte) error {
+		if encoded == nil {
+			return corruptf("tenant fences contains a nested bucket")
+		}
+		var record ownership.Fence
+		if err := decodeRecord(encoded, &record); err != nil {
+			return err
+		}
+		if string(key) != record.TenantDigest || record.Validate() != nil {
+			return corruptf("tenant fence record is invalid")
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return tx.Bucket(tenantBundlesBucket).ForEach(func(key, encoded []byte) error {
+		if encoded == nil {
+			return corruptf("tenant bundles contains a nested bucket")
+		}
+		var bundle ownership.Bundle
+		if err := decodeRecord(encoded, &bundle); err != nil {
+			return err
+		}
+		if string(key) != bundle.MigrationID || ownership.CanonicalizeBundle(&bundle) != nil {
+			return corruptf("tenant bundle record is invalid")
+		}
+		return nil
+	})
 }
 
 func validateDataBuckets(tx *bolt.Tx) error {

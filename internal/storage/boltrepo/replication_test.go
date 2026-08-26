@@ -9,6 +9,7 @@ import (
 
 	bolt "go.etcd.io/bbolt"
 
+	"simq/internal/ownership"
 	"simq/internal/queue"
 )
 
@@ -57,6 +58,9 @@ func TestOpenMigratesSchemaV6ToV7AndKeepsBackup(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := db.Update(func(tx *bolt.Tx) error {
+		if err := deleteM8Buckets(tx); err != nil {
+			return err
+		}
 		if err := tx.DeleteBucket(tenantUsageBucket); err != nil {
 			return err
 		}
@@ -128,11 +132,19 @@ func TestSnapshotRestoreReplacesWholeReplicatedState(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	digest := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	migrationID := "tm_00000000000000000000000000000004"
+	if _, err := repository.BeginMigration(ownership.BeginCommand{MigrationID: migrationID, TenantDigest: digest, SourceShard: "s0", DestinationShard: "s1", SourceEpoch: 1}); err != nil {
+		t.Fatal(err)
+	}
 	var snapshot bytes.Buffer
 	if err := repository.WriteSnapshot(&snapshot); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repository.Create(queue.Queue{Name: "after", VisibilityTimeout: 30, MessageRetentionPeriod: queue.DefaultMessageRetentionPeriod}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.TransitionMigration(ownership.TransitionCommand{MigrationID: migrationID, ExpectedPhase: ownership.PhaseFreezing, NextPhase: ownership.PhaseAborting}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repository.RestoreSnapshot(bytes.NewReader(snapshot.Bytes())); err != nil {
@@ -146,6 +158,9 @@ func TestSnapshotRestoreReplacesWholeReplicatedState(t *testing.T) {
 	}
 	if index, err := repository.AppliedRaftIndex(); err != nil || index != 4 {
 		t.Fatalf("restored index = %d, %v", index, err)
+	}
+	if migration, found, err := repository.LocalMigration(migrationID); err != nil || !found || migration.Phase != ownership.PhaseFreezing {
+		t.Fatalf("restored migration = %+v, found=%v err=%v", migration, found, err)
 	}
 }
 

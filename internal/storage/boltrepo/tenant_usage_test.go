@@ -54,7 +54,7 @@ func TestStorageQuotaIsAtomicWithQueueAndMessageUsage(t *testing.T) {
 	}
 }
 
-func TestOpenMigratesSchemaV7ThroughV8ToV9AndRebuildsUsage(t *testing.T) {
+func TestOpenMigratesSchemaV7ThroughV8AndV9ToV10AndRebuildsUsage(t *testing.T) {
 	path := t.TempDir() + "/queue.db"
 	repository, err := Open(Config{Path: path})
 	if err != nil {
@@ -71,7 +71,15 @@ func TestOpenMigratesSchemaV7ThroughV8ToV9AndRebuildsUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := db.Update(func(tx *bolt.Tx) error {
+		if err := deleteM8Buckets(tx); err != nil {
+			return err
+		}
 		if err := tx.DeleteBucket(tenantUsageBucket); err != nil {
+			return err
+		}
+		protocol := make([]byte, 4)
+		binary.BigEndian.PutUint32(protocol, replicatedCommandProtocolVersionV1)
+		if err := tx.Bucket(metadataBucket).Put(commandProtocolVersionKey, protocol); err != nil {
 			return err
 		}
 		version := make([]byte, 4)
@@ -104,6 +112,9 @@ func TestOpenMigratesSchemaV7ThroughV8ToV9AndRebuildsUsage(t *testing.T) {
 	}
 	if info, err := os.Stat(path + schemaV8BackupSuffix); err != nil || info.Size() == 0 {
 		t.Fatalf("schema-v8 backup=%v err=%v", info, err)
+	}
+	if info, err := os.Stat(path + schemaV9BackupSuffix); err != nil || info.Size() == 0 {
+		t.Fatalf("schema-v9 backup=%v err=%v", info, err)
 	}
 }
 

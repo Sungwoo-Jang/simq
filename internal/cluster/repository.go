@@ -16,11 +16,12 @@ import (
 
 	"github.com/hashicorp/raft"
 
+	"simq/internal/ownership"
 	"simq/internal/queue"
 	"simq/internal/storage/boltrepo"
 )
 
-const commandVersion uint32 = 1
+const commandVersion uint32 = 2
 
 type Config struct {
 	NodeID, BindAddress, AdvertiseAddress, DataDir string
@@ -414,6 +415,7 @@ func errorForCode(code string) error { return knownErrors[code] }
 
 var knownErrors = map[string]error{
 	"queue_exists": queue.ErrQueueAlreadyExists, "queue_missing": queue.ErrQueueDoesNotExist, "message_id_exists": queue.ErrMessageIDExists, "message_id_unavailable": queue.ErrMessageIDUnavailable, "queue_id_unavailable": queue.ErrQueueIDUnavailable, "receipt_exists": queue.ErrReceiptHandleExists, "receipt_unavailable": queue.ErrReceiptUnavailable, "receipt_invalid": queue.ErrReceiptHandleIsInvalid, "pagination": queue.ErrInvalidPaginationToken, "over_limit": queue.ErrOverLimit, "queue_in_use": queue.ErrQueueInUse, "move_running": queue.ErrMoveTaskAlreadyRunning, "move_not_running": queue.ErrMoveTaskNotRunning, "move_missing": queue.ErrMoveTaskDoesNotExist, "not_dlq": queue.ErrQueueIsNotDeadLetter, "quota": queue.ErrQuotaExceeded,
+	"ownership_conflict": queue.ErrTenantOwnershipConflict, "migration_missing": queue.ErrMigrationDoesNotExist, "migration_exists": queue.ErrMigrationAlreadyExists, "tenant_migrating": queue.ErrTenantMigrating,
 }
 
 func decodeInput[T any](raw json.RawMessage) (T, error) {
@@ -546,10 +548,148 @@ func dispatch(local *boltrepo.Repository, cmd command) (any, error) {
 			return nil, e
 		}
 		return local.MoveTaskStep(v.Handle, v.Now)
+	case "begin_tenant_migration":
+		v, e := decodeInput[ownership.BeginCommand](cmd.Input)
+		if e != nil {
+			return nil, e
+		}
+		return local.BeginMigration(v)
+	case "transition_tenant_migration":
+		v, e := decodeInput[ownership.TransitionCommand](cmd.Input)
+		if e != nil {
+			return nil, e
+		}
+		return local.TransitionMigration(v)
+	case "freeze_tenant":
+		v, e := decodeInput[ownership.Migration](cmd.Input)
+		if e != nil {
+			return nil, e
+		}
+		return local.FreezeAndCapture(v)
+	case "prepare_tenant":
+		v, e := decodeInput[struct {
+			Migration ownership.Migration
+			Bundle    ownership.Bundle
+		}](cmd.Input)
+		if e != nil {
+			return nil, e
+		}
+		return local.Prepare(v.Migration, v.Bundle)
+	case "activate_tenant":
+		v, e := decodeInput[ownership.Migration](cmd.Input)
+		if e != nil {
+			return nil, e
+		}
+		return local.Activate(v)
+	case "cleanup_tenant":
+		v, e := decodeInput[ownership.Migration](cmd.Input)
+		if e != nil {
+			return nil, e
+		}
+		return local.Cleanup(v)
+	case "abort_tenant_source":
+		v, e := decodeInput[ownership.Migration](cmd.Input)
+		if e != nil {
+			return nil, e
+		}
+		return nil, local.AbortSource(v)
+	case "abort_tenant_destination":
+		v, e := decodeInput[ownership.Migration](cmd.Input)
+		if e != nil {
+			return nil, e
+		}
+		return nil, local.AbortDestination(v)
 	default:
 		return nil, fmt.Errorf("unknown replicated operation %q", cmd.Operation)
 	}
 }
+
+func (r *Repository) Ownership(digest string) (ownership.Record, bool, error) {
+	if err := r.linearizableRead(); err != nil {
+		return ownership.Record{}, false, err
+	}
+	return r.LocalOwnership(digest)
+}
+
+func (r *Repository) LocalOwnership(digest string) (ownership.Record, bool, error) {
+	r.core.stateMu.RLock()
+	defer r.core.stateMu.RUnlock()
+	return r.core.local.LocalOwnership(digest)
+}
+
+func (r *Repository) Migration(id string) (ownership.Migration, bool, error) {
+	if err := r.linearizableRead(); err != nil {
+		return ownership.Migration{}, false, err
+	}
+	return r.LocalMigration(id)
+}
+
+func (r *Repository) LocalMigration(id string) (ownership.Migration, bool, error) {
+	r.core.stateMu.RLock()
+	defer r.core.stateMu.RUnlock()
+	return r.core.local.LocalMigration(id)
+}
+
+func (r *Repository) ListMigrations(limit int) ([]ownership.Migration, error) {
+	if err := r.linearizableRead(); err != nil {
+		return nil, err
+	}
+	r.core.stateMu.RLock()
+	defer r.core.stateMu.RUnlock()
+	return r.core.local.ListMigrations(limit)
+}
+
+func (r *Repository) BeginMigration(command ownership.BeginCommand) (ownership.Migration, error) {
+	return mutate[ownership.Migration](r, "begin_tenant_migration", command)
+}
+
+func (r *Repository) TransitionMigration(command ownership.TransitionCommand) (ownership.Migration, error) {
+	return mutate[ownership.Migration](r, "transition_tenant_migration", command)
+}
+
+func (r *Repository) LocalFence(digest string) (ownership.Fence, bool, error) {
+	r.core.stateMu.RLock()
+	defer r.core.stateMu.RUnlock()
+	return r.core.local.LocalFence(digest)
+}
+
+func (r *Repository) LocalBundle(id string) (ownership.Bundle, bool, error) {
+	r.core.stateMu.RLock()
+	defer r.core.stateMu.RUnlock()
+	return r.core.local.LocalBundle(id)
+}
+
+func (r *Repository) FreezeAndCapture(migration ownership.Migration) (ownership.Fence, error) {
+	return mutate[ownership.Fence](r, "freeze_tenant", migration)
+}
+
+func (r *Repository) Prepare(migration ownership.Migration, bundle ownership.Bundle) (ownership.Fence, error) {
+	return mutate[ownership.Fence](r, "prepare_tenant", struct {
+		Migration ownership.Migration
+		Bundle    ownership.Bundle
+	}{migration, bundle})
+}
+
+func (r *Repository) Activate(migration ownership.Migration) (ownership.Fence, error) {
+	return mutate[ownership.Fence](r, "activate_tenant", migration)
+}
+
+func (r *Repository) Cleanup(migration ownership.Migration) (ownership.Fence, error) {
+	return mutate[ownership.Fence](r, "cleanup_tenant", migration)
+}
+
+func (r *Repository) AbortSource(migration ownership.Migration) error {
+	_, err := mutate[struct{}](r, "abort_tenant_source", migration)
+	return err
+}
+
+func (r *Repository) AbortDestination(migration ownership.Migration) error {
+	_, err := mutate[struct{}](r, "abort_tenant_destination", migration)
+	return err
+}
+
+var _ ownership.ControlStore = (*Repository)(nil)
+var _ ownership.DataStore = (*Repository)(nil)
 
 func (r *Repository) Create(v queue.Queue) (queue.Queue, error) {
 	if len(v.ID) != 34 || v.ID[:2] != "q_" {

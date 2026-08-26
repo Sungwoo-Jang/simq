@@ -15,6 +15,15 @@ import (
 	"simq/internal/queue"
 )
 
+func deleteM8Buckets(tx *bolt.Tx) error {
+	for _, name := range [][]byte{tenantOwnershipBucket, tenantMigrationsBucket, tenantFencesBucket, tenantBundlesBucket} {
+		if err := tx.DeleteBucket(name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func TestOpenMigratesValidSchemaV1AndKeepsBackup(t *testing.T) {
 	path, sentAt := createLegacyV1Database(t)
 	repository, err := Open(Config{Path: path, OpenTimeout: time.Second})

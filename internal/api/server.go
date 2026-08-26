@@ -21,6 +21,7 @@ import (
 
 	"simq/internal/auth"
 	"simq/internal/observability"
+	"simq/internal/ownership"
 	"simq/internal/queue"
 )
 
@@ -325,6 +326,33 @@ type clusterMembershipRequest struct {
 	MaxCommandVersion *uint32 `json:"MaxCommandVersion"`
 }
 
+type tenantMigrationView struct {
+	MigrationID      string `json:"MigrationId"`
+	TenantDigest     string `json:"TenantDigest"`
+	SourceShard      string `json:"SourceShard"`
+	DestinationShard string `json:"DestinationShard"`
+	SourceEpoch      uint64 `json:"SourceEpoch"`
+	DestinationEpoch uint64 `json:"DestinationEpoch"`
+	Phase            string `json:"Phase"`
+	BundleHash       string `json:"BundleHash,omitempty"`
+}
+
+type tenantMigrationStatusView struct {
+	Migration     tenantMigrationView `json:"Migration"`
+	NextAction    string              `json:"NextAction,omitempty"`
+	NextShard     string              `json:"NextShard,omitempty"`
+	NextLeaderURL string              `json:"NextLeaderUrl,omitempty"`
+	LocalLeader   bool                `json:"LocalLeader"`
+}
+
+func migrationView(value ownership.Migration) tenantMigrationView {
+	return tenantMigrationView{MigrationID: value.ID, TenantDigest: value.TenantDigest, SourceShard: value.SourceShard, DestinationShard: value.DestinationShard, SourceEpoch: value.SourceEpoch, DestinationEpoch: value.DestinationEpoch, Phase: string(value.Phase), BundleHash: value.BundleHash}
+}
+
+func migrationStatusView(value ownership.Status) tenantMigrationStatusView {
+	return tenantMigrationStatusView{Migration: migrationView(value.Migration), NextAction: value.NextAction, NextShard: value.NextShard, NextLeaderURL: value.NextLeaderURL, LocalLeader: value.LocalLeader}
+}
+
 func (s *Server) serveClusterAdmin(response http.ResponseWriter, request *http.Request) {
 	requestID := s.nextRequestID()
 	response.Header().Set("X-SimQ-Request-Id", requestID)
@@ -335,6 +363,83 @@ func (s *Server) serveClusterAdmin(response http.ResponseWriter, request *http.R
 		return
 	}
 	switch {
+	case request.Method == http.MethodGet && request.URL.Path == "/v1/cluster/tenant-migrations":
+		limit := 100
+		if raw := request.URL.Query().Get("Limit"); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil || parsed < 1 || parsed > 1000 {
+				writeError(response, http.StatusBadRequest, "InvalidRequest", "Limit must be from 1 through 1000.", requestID)
+				return
+			}
+			limit = parsed
+		}
+		migrations, err := s.queueService.ListTenantMigrations(limit)
+		if err != nil {
+			s.writeTenantMigrationError(response, requestID, ownership.Status{}, err)
+			return
+		}
+		items := make([]tenantMigrationView, len(migrations))
+		for index, migration := range migrations {
+			items[index] = migrationView(migration)
+		}
+		writeJSON(response, http.StatusOK, struct {
+			Migrations []tenantMigrationView `json:"Migrations"`
+			RequestID  string                `json:"RequestId"`
+		}{items, requestID})
+	case request.Method == http.MethodGet && request.URL.Path == "/v1/cluster/tenant-migrations/status":
+		status, err := s.queueService.TenantMigrationStatus(request.URL.Query().Get("MigrationId"))
+		if err != nil {
+			s.writeTenantMigrationError(response, requestID, status, err)
+			return
+		}
+		writeJSON(response, http.StatusOK, struct {
+			Status    tenantMigrationStatusView `json:"Status"`
+			RequestID string                    `json:"RequestId"`
+		}{migrationStatusView(status), requestID})
+	case request.Method == http.MethodPost && request.URL.Path == "/v1/cluster/tenant-migrations":
+		var input struct {
+			MigrationID, TenantDigest, DestinationShard string
+		}
+		if !decodeStrictAdminJSON(response, request, requestID, &input) {
+			return
+		}
+		migration, err := s.queueService.BeginTenantMigration(input.MigrationID, input.TenantDigest, input.DestinationShard)
+		if err != nil {
+			s.writeTenantMigrationError(response, requestID, ownership.Status{}, err)
+			return
+		}
+		writeJSON(response, http.StatusOK, struct {
+			Migration tenantMigrationView `json:"Migration"`
+			RequestID string              `json:"RequestId"`
+		}{migrationView(migration), requestID})
+	case request.Method == http.MethodPost && request.URL.Path == "/v1/cluster/tenant-migrations/advance":
+		var input struct{ MigrationID string }
+		if !decodeStrictAdminJSON(response, request, requestID, &input) {
+			return
+		}
+		status, err := s.queueService.AdvanceTenantMigration(input.MigrationID)
+		if err != nil {
+			s.writeTenantMigrationError(response, requestID, status, err)
+			return
+		}
+		writeJSON(response, http.StatusOK, struct {
+			Status    tenantMigrationStatusView `json:"Status"`
+			RequestID string                    `json:"RequestId"`
+		}{migrationStatusView(status), requestID})
+	case request.Method == http.MethodPost && request.URL.Path == "/v1/cluster/tenant-migrations/abort":
+		var input struct{ MigrationID string }
+		if !decodeStrictAdminJSON(response, request, requestID, &input) {
+			return
+		}
+		status, err := s.queueService.AbortTenantMigration(input.MigrationID)
+		if err != nil {
+			s.writeTenantMigrationError(response, requestID, status, err)
+			return
+		}
+		writeJSON(response, http.StatusOK, struct {
+			Status    tenantMigrationStatusView `json:"Status"`
+			RequestID string                    `json:"RequestId"`
+		}{migrationStatusView(status), requestID})
 	case request.Method == http.MethodGet && request.URL.Path == "/v1/cluster/shards":
 		statuses, err := s.queueService.ShardStatuses()
 		if err != nil {
@@ -366,7 +471,7 @@ func (s *Server) serveClusterAdmin(response http.ResponseWriter, request *http.R
 			MinCommandVersion uint32 `json:"MinCommandVersion"`
 			MaxCommandVersion uint32 `json:"MaxCommandVersion"`
 			RequestID         string `json:"RequestId"`
-		}{1, 1, requestID})
+		}{2, 2, requestID})
 	case request.Method == http.MethodGet && request.URL.Path == "/v1/cluster/members":
 		members, err := s.queueService.ClusterMembers()
 		if err != nil {
@@ -386,7 +491,7 @@ func (s *Server) serveClusterAdmin(response http.ResponseWriter, request *http.R
 			return
 		}
 		adding := input.Action == "add-voter" || input.Action == "add-nonvoter"
-		compatible := !adding || (input.MinCommandVersion != nil && input.MaxCommandVersion != nil && *input.MinCommandVersion <= 1 && *input.MaxCommandVersion >= 1)
+		compatible := !adding || (input.MinCommandVersion != nil && input.MaxCommandVersion != nil && *input.MinCommandVersion <= 2 && *input.MaxCommandVersion >= 2)
 		if input.NodeID == "" || adding && input.RaftAddress == "" || !compatible {
 			writeError(response, http.StatusBadRequest, "InvalidRequest", "A valid Action, NodeId, and required RaftAddress are required.", requestID)
 			return
@@ -411,7 +516,7 @@ func (s *Server) serveClusterAdmin(response http.ResponseWriter, request *http.R
 			return
 		}
 		adding := input.Action == "add-voter" || input.Action == "add-nonvoter"
-		compatible := !adding || input.MinCommandVersion != nil && input.MaxCommandVersion != nil && *input.MinCommandVersion <= 1 && *input.MaxCommandVersion >= 1
+		compatible := !adding || input.MinCommandVersion != nil && input.MaxCommandVersion != nil && *input.MinCommandVersion <= 2 && *input.MaxCommandVersion >= 2
 		if input.ShardID == "" || input.NodeID == "" || adding && input.RaftAddress == "" || !compatible {
 			writeError(response, http.StatusBadRequest, "InvalidRequest", "Valid ShardId, Action, NodeId, protocol range, and required RaftAddress are required.", requestID)
 			return
@@ -454,6 +559,39 @@ func (s *Server) serveClusterAdmin(response http.ResponseWriter, request *http.R
 		}{requestID})
 	default:
 		writeError(response, http.StatusNotFound, "UnknownAction", "The requested cluster action does not exist.", requestID)
+	}
+}
+
+func decodeStrictAdminJSON(response http.ResponseWriter, request *http.Request, requestID string, destination any) bool {
+	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 64<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		writeError(response, http.StatusBadRequest, "InvalidRequest", "The migration request is malformed.", requestID)
+		return false
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeError(response, http.StatusBadRequest, "InvalidRequest", "The migration request has trailing content.", requestID)
+		return false
+	}
+	return true
+}
+
+func (s *Server) writeTenantMigrationError(response http.ResponseWriter, requestID string, status ownership.Status, err error) {
+	if status.NextLeaderURL != "" {
+		response.Header().Set("X-SimQ-Leader", status.NextLeaderURL)
+	}
+	var invalid *queue.InvalidRequestError
+	switch {
+	case errors.As(err, &invalid):
+		writeError(response, http.StatusBadRequest, "InvalidRequest", invalid.Error(), requestID)
+	case errors.Is(err, queue.ErrMigrationDoesNotExist):
+		writeError(response, http.StatusNotFound, "MigrationDoesNotExist", "The tenant migration does not exist.", requestID)
+	case errors.Is(err, queue.ErrMigrationAlreadyExists), errors.Is(err, queue.ErrTenantOwnershipConflict):
+		writeError(response, http.StatusConflict, "MigrationConflict", "The tenant migration conflicts with authoritative state.", requestID)
+	case errors.Is(err, queue.ErrRepositoryUnavailable):
+		writeStorageUnavailable(response, requestID)
+	default:
+		writeError(response, http.StatusInternalServerError, "InternalError", "The migration request could not be completed.", requestID)
 	}
 }
 
