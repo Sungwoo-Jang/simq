@@ -62,13 +62,12 @@ When retained, the nodes are available at:
 
 | Node | HTTP API | Raft address inside Compose |
 |---|---|---|
-| n1 | `http://127.0.0.1:19324` | `172.31.250.11:7000` |
-| n2 | `http://127.0.0.1:19325` | `172.31.250.12:7000` |
-| n3 | `http://127.0.0.1:19326` | `172.31.250.13:7000` |
+| n1 | `http://127.0.0.1:19324` | `n1:7000` |
+| n2 | `http://127.0.0.1:19325` | `n2:7000` |
+| n3 | `http://127.0.0.1:19326` | `n3:7000` |
 
-The fixed private addresses are scoped to the Compose network. Raft resolves
-advertised addresses before bootstrap, so the initial voter set must contain
-the same resolved addresses rather than mutable container DNS names.
+The Raft configuration retains these stable Compose DNS names. This is the
+same address model used by the StatefulSet validation profile.
 
 Stop and delete only this environment with:
 

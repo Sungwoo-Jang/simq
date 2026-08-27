@@ -1114,7 +1114,26 @@ M9 MUST add automated evidence for at least the following cases:
 | Drain preserves FIFO order and retires only after the final owner moves | FIFO-001–FIFO-004, REL-008, TOP-007 |
 | Retired shard ID/incarnation reuse and stale restore are rejected | CLU-012, TOP-001, TOP-008 |
 
-## 30. Forbidden implementation shortcuts
+## 30. Required M10 evidence
+
+M10 MUST add automated evidence for at least the following cases:
+
+| Test scenario | Invariants demonstrated |
+|---|---|
+| A pull request runs exact-toolchain verify and a real three-process failure test | CON-001, DUR-001, CLU-004 |
+| Ephemeral OIDC/TLS fixtures start two independent Raft shards and isolate two tenants | SEC-005–SEC-010, SHD-001–SHD-004 |
+| A Raft-only minority partition remains API-reachable but cannot acknowledge writes | CLU-003, CLU-010, SEC-001 |
+| The majority commits FIFO work and the reconnected replica converges | FIFO-001, FIFO-002, FIFO-006, CLU-004, CLU-007 |
+| Stopped-node volume archives restore into recreated volumes with authoritative state intact | DUR-001–DUR-006, CLU-008, CLU-011 |
+| Prometheus parses every rule and deterministic series fire and clear expected alerts | SEC-010 |
+| Stable DNS voters bootstrap in Kubernetes and a leader Pod replacement preserves acknowledged state | DUR-001, CLU-004, CLU-009, CLU-010 |
+
+Local kind evidence MUST NOT be presented as proof of independent physical
+failure domains. Online file copying, unbounded fault injection, committed test
+credentials, and cleanup that targets resources outside the named M10 project
+or cluster are forbidden.
+
+## 31. Forbidden implementation shortcuts
 
 The following approaches violate this document unless the specification is
 explicitly changed:
@@ -1161,7 +1180,7 @@ explicitly changed:
 - Retiring a shard while an ownership record or unfinished migration names it.
 - Reusing a retired shard ID, incarnation, or on-disk directory.
 
-## 31. Changing an invariant
+## 32. Changing an invariant
 
 An invariant may change only when all of the following are present:
 

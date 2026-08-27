@@ -1,0 +1,60 @@
+name: verify
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go-verify:
+    name: Go 1.26.7 verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install Go 1.26.7
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: 1.26.7
+          cache: true
+      - name: Run repository verification gate
+        run: ./scripts/verify.sh
+
+  docker-integration:
+    name: Three-node Raft integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install Go 1.26.7
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: 1.26.7
+          cache: true
+      - name: Run process-failure integration profile
+        run: ./scripts/integration.sh
+      - name: Print integration diagnostics after failure
+        if: failure()
+        run: |
+          test ! -f .cache/integration/compose-ps.txt || cat .cache/integration/compose-ps.txt
+          test ! -f .cache/integration/compose.log || tail -n 500 .cache/integration/compose.log
+
+  alert-rules:
+    name: Prometheus alert rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Evaluate alert scenarios
+        run: ./scripts/alerts.sh

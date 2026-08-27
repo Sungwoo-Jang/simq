@@ -1,0 +1,75 @@
+rule_files:
+  - simq-alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'up{job="simq",instance="n1"}'
+        values: '0 0 0 0'
+      - series: 'up{job="simq",instance="n2"}'
+        values: '1 1 1 1'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: SimQTargetDown
+        exp_alerts:
+          - exp_labels:
+              alertname: SimQTargetDown
+              instance: n1
+              job: simq
+              severity: critical
+            exp_annotations:
+              summary: SimQ metrics target is down
+              description: Prometheus has been unable to scrape this SimQ target for two minutes.
+
+  - interval: 1m
+    input_series:
+      - series: 'probe_success{job="simq-ready",instance="simq-api"}'
+        values: '0 0 0'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: SimQNoReadyLeader
+        exp_alerts:
+          - exp_labels:
+              alertname: SimQNoReadyLeader
+              instance: simq-api
+              job: simq-ready
+              severity: critical
+            exp_annotations:
+              summary: SimQ leader service is not ready
+              description: The black-box readiness probe cannot reach a leader-fenced ready endpoint.
+
+  - interval: 1m
+    input_series:
+      - series: 'simq_http_requests_total{instance="n1",tenant_hash="bounded",action="SendMessage",result="5xx"}'
+        values: '0 0 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: SimQServerErrors
+        exp_alerts:
+          - exp_labels:
+              alertname: SimQServerErrors
+              instance: n1
+              severity: warning
+            exp_annotations:
+              summary: SimQ is returning server errors
+              description: At least one authenticated queue request returned a 5xx response in the last five minutes.
+
+  - interval: 1m
+    input_series:
+      - series: 'simq_http_requests_total{instance="n1",tenant_hash="bounded",action="SendMessage",result="2xx"}'
+        values: '0 60 120 180 240 300 360 420'
+      - series: 'simq_http_request_duration_seconds_total{instance="n1",tenant_hash="bounded",action="SendMessage",result="2xx"}'
+        values: '0 60 120 180 240 300 360 420'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: SimQHighAverageRequestLatency
+        exp_alerts:
+          - exp_labels:
+              alertname: SimQHighAverageRequestLatency
+              instance: n1
+              severity: warning
+            exp_annotations:
+              summary: SimQ average request latency is high
+              description: Mean authenticated queue-request latency has exceeded 500 ms for two minutes.

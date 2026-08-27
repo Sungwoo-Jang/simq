@@ -151,7 +151,10 @@ func Open(config Config) (*Repository, error) {
 		}
 		selfFound := false
 		for _, server := range servers {
-			if server.ID == raft.ServerID(config.NodeID) && server.Address == transport.LocalAddr() {
+			// NetworkTransport resolves the advertised endpoint before exposing
+			// LocalAddr. The Raft configuration deliberately retains the
+			// configured address so stable DNS names survive Pod rescheduling.
+			if server.ID == raft.ServerID(config.NodeID) && server.Address == raft.ServerAddress(config.AdvertiseAddress) {
 				selfFound = true
 			}
 		}

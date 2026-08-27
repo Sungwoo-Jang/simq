@@ -1,0 +1,137 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: simq-m10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: simq-headless
+  namespace: simq-m10
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: simq
+  ports:
+    - name: raft
+      port: 7000
+      targetPort: raft
+    - name: http
+      port: 9324
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: simq-api
+  namespace: simq-m10
+spec:
+  selector:
+    app: simq
+  ports:
+    - name: http
+      port: 9324
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: simq
+  namespace: simq-m10
+spec:
+  serviceName: simq-headless
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: simq
+  template:
+    metadata:
+      labels:
+        app: simq
+    spec:
+      terminationGracePeriodSeconds: 5
+      securityContext:
+        fsGroup: 100
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: simq
+      containers:
+        - name: simq
+          image: simq:kind
+          imagePullPolicy: Never
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              case "$HOSTNAME" in
+                simq-0) node_id=n1; bootstrap=true ;;
+                simq-1) node_id=n2; bootstrap=false ;;
+                simq-2) node_id=n3; bootstrap=false ;;
+                *) echo "unexpected StatefulSet hostname: $HOSTNAME" >&2; exit 1 ;;
+              esac
+              export SIMQ_CLUSTER_NODE_ID="$node_id"
+              export SIMQ_CLUSTER_BOOTSTRAP="$bootstrap"
+              export SIMQ_CLUSTER_ADVERTISE="$HOSTNAME.simq-headless.simq-m10.svc.cluster.local:7000"
+              exec /usr/local/bin/simq
+          env:
+            - name: SIMQ_ADDR
+              value: ":9324"
+            - name: SIMQ_PUBLIC_BASE_URL
+              value: "http://simq-api.simq-m10.svc.cluster.local:9324"
+            - name: SIMQ_STORAGE
+              value: bbolt
+            - name: SIMQ_DATA_PATH
+              value: /var/lib/simq/standalone.db
+            - name: SIMQ_CLUSTER_BIND
+              value: "0.0.0.0:7000"
+            - name: SIMQ_CLUSTER_DATA_DIR
+              value: /var/lib/simq/cluster
+            - name: SIMQ_CLUSTER_INITIAL_VOTERS
+              value: "n1=simq-0.simq-headless.simq-m10.svc.cluster.local:7000,n2=simq-1.simq-headless.simq-m10.svc.cluster.local:7000,n3=simq-2.simq-headless.simq-m10.svc.cluster.local:7000"
+            - name: SIMQ_CLUSTER_API_URLS
+              value: "n1=http://simq-0.simq-headless.simq-m10.svc.cluster.local:9324,n2=http://simq-1.simq-headless.simq-m10.svc.cluster.local:9324,n3=http://simq-2.simq-headless.simq-m10.svc.cluster.local:9324"
+            - name: SIMQ_CLUSTER_ADMIN_TOKEN
+              value: local-kind-admin
+            - name: SIMQ_RETENTION_SWEEP_INTERVAL
+              value: 1h
+          ports:
+            - name: http
+              containerPort: 9324
+            - name: raft
+              containerPort: 7000
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 2
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 1
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/simq
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 256Mi

@@ -95,7 +95,7 @@ purged before enabling OIDC mode and otherwise fail closed.
 | Graceful shutdown | complete | Long-poll waiters and HTTP plus retention sweeper stop before repository close |
 | Metrics | complete for M6 request boundary | Bounded tenant-hash/action/result request count and cumulative latency exposition |
 | Tracing | partial | Valid W3C trace IDs correlate audit events; span export remains deferred |
-| Alerting | planned | No SLO or alert rules |
+| Alerting | complete for local rule evaluation | Target, ready-leader, server-error, and latency rules pass deterministic promtool tests; notification routing remains staging evidence |
 | Audit logging | complete | Synchronized redacted JSONL sink with hashed tenant and issuer-subject identity |
 | Web/admin dashboard | planned | Build after authoritative metrics and access control exist |
 | Horizontal scaling | complete for reviewed elastic tenant sharding | Candidate groups activate after explicit-directory backfill; selective nodes host planned subsets and drains move one tenant at a time |
@@ -121,6 +121,7 @@ purged before enabling OIDC mode and otherwise fail closed.
 | M7 | complete | Fixed catalog, tenant rendezvous routing, independent Raft shards, safe placement, relocation, and per-shard recovery |
 | M8 | complete | Epoch-fenced tenant relocation, bounded verified transfer, resumable cutover/abort, and leader-failure recovery |
 | M9 | complete | Explicit tenant directory, manifest-v2 candidate universe, selective hosting, activation, sequential drain, retirement, and permanent tombstones |
+| M10 | in progress with host limitation | CI, secure multi-shard failure injection, offline recovery, and tested SLO alerts pass; kind artifacts are complete but this workstation's Docker cgroup v1 cannot run nested kubelet cgroups |
 
 ## Update rules
 
