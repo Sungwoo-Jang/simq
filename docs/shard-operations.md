@@ -87,6 +87,8 @@ catalog revision; the FSM validates it before publication. Prefer replacing a
 lost replica by adding a planned nonvoter and letting Raft catch it up from the
 surviving quorum.
 
-M8 adds epoch-fenced movement of a complete tenant between these existing shard
-IDs. Follow `docs/tenant-relocation.md`; operators must not copy tenant buckets
-manually. Dynamic shard-ID changes and selective shard hosting remain deferred.
+M8 adds epoch-fenced movement of a complete tenant between shard IDs. M9 adds a
+version-2 manifest, reviewed candidate shard IDs, selective hosting, explicit
+tenant assignment, and drain/retirement. Follow `tenant-relocation.md` for one
+manual move and `topology-operations.md` for catalog changes; operators must not
+copy tenant buckets manually.

@@ -13,10 +13,12 @@ import (
 
 	"simq/internal/ownership"
 	"simq/internal/queue"
+	"simq/internal/topology"
 )
 
 const (
-	schemaVersion       uint32 = 10
+	schemaVersion       uint32 = 11
+	schemaVersionV10    uint32 = 10
 	schemaVersionV9     uint32 = 9
 	schemaVersionV8     uint32 = 8
 	schemaVersionV7     uint32 = 7
@@ -53,6 +55,9 @@ var (
 	tenantMigrationsBucket     = []byte("tenant_migrations")
 	tenantFencesBucket         = []byte("tenant_fences")
 	tenantBundlesBucket        = []byte("tenant_bundles")
+	topologyCatalogBucket      = []byte("topology_catalog")
+	topologyOperationsBucket   = []byte("topology_operations")
+	topologyTombstonesBucket   = []byte("topology_tombstones")
 	schemaVersionKey           = []byte("schema_version")
 	installationIDKey          = []byte("installation_id")
 	namespaceRevisionKey       = []byte("namespace_revision")
@@ -66,7 +71,8 @@ var (
 	requiredBucketsV6          = [][]byte{metadataBucket, queuesBucket, messagesBucket, messageOrderBucket, messageIDsBucket, receiptsBucket, queueIdentitiesBucket, queueTagsBucket, queuePermissionsBucket, queueTombstonesBucket, redrivePoliciesBucket, redriveOriginsBucket, moveTasksBucket, fifoQueuesBucket, fifoSequencesBucket, fifoMessagesBucket, fifoDedupBucket, fifoAttemptsBucket}
 	requiredBucketsV7          = append(append([][]byte(nil), requiredBucketsV6...), replicationProposalsBucket)
 	requiredBucketsV9          = append(append([][]byte(nil), requiredBucketsV7...), tenantUsageBucket)
-	requiredBuckets            = append(append([][]byte(nil), requiredBucketsV9...), tenantOwnershipBucket, tenantMigrationsBucket, tenantFencesBucket, tenantBundlesBucket)
+	requiredBucketsV10         = append(append([][]byte(nil), requiredBucketsV9...), tenantOwnershipBucket, tenantMigrationsBucket, tenantFencesBucket, tenantBundlesBucket)
+	requiredBuckets            = append(append([][]byte(nil), requiredBucketsV10...), topologyCatalogBucket, topologyOperationsBucket, topologyTombstonesBucket)
 )
 
 func initializeSchema(tx *bolt.Tx, installationID string) error {
@@ -116,6 +122,34 @@ func transactionSchemaVersion(tx *bolt.Tx) (uint32, error) {
 
 func validateTransaction(tx *bolt.Tx) error {
 	if err := validateSchemaEnvelope(tx, requiredBuckets, schemaVersion, true); err != nil {
+		return err
+	}
+	if err := validateDataBuckets(tx); err != nil {
+		return err
+	}
+	if err := validateAdministrationBuckets(tx); err != nil {
+		return err
+	}
+	if err := validateRedriveBuckets(tx); err != nil {
+		return err
+	}
+	if err := validateFIFOBuckets(tx); err != nil {
+		return err
+	}
+	if err := validateReplicationState(tx); err != nil {
+		return err
+	}
+	if err := validateTenantUsage(tx); err != nil {
+		return err
+	}
+	if err := validateTenantRelocation(tx); err != nil {
+		return err
+	}
+	return validateTopology(tx)
+}
+
+func validateTransactionV10(tx *bolt.Tx) error {
+	if err := validateSchemaEnvelope(tx, requiredBucketsV10, schemaVersionV10, true); err != nil {
 		return err
 	}
 	if err := validateDataBuckets(tx); err != nil {
@@ -340,6 +374,9 @@ func validateSchemaEnvelope(tx *bolt.Tx, buckets [][]byte, expectedVersion uint3
 		}
 		protocol := metadata.Get(commandProtocolVersionKey)
 		expectedProtocol := replicatedCommandProtocolVersionV1
+		if expectedVersion >= schemaVersionV10 {
+			expectedProtocol = replicatedCommandProtocolVersionV2
+		}
 		if expectedVersion >= schemaVersion {
 			expectedProtocol = replicatedCommandProtocolVersion
 		}
@@ -354,6 +391,38 @@ func validateSchemaEnvelope(tx *bolt.Tx, buckets [][]byte, expectedVersion uint3
 		}
 	}
 	return nil
+}
+
+func validateTopology(tx *bolt.Tx) error {
+	catalogBucket := tx.Bucket(topologyCatalogBucket)
+	if err := catalogBucket.ForEach(func(key, encoded []byte) error {
+		if string(key) != "catalog" || encoded == nil {
+			return corruptf("topology catalog contains an invalid entry")
+		}
+		var catalog topology.Catalog
+		if decodeRecord(encoded, &catalog) != nil || catalog.Canonicalize() != nil {
+			return corruptf("topology catalog is invalid")
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := tx.Bucket(topologyOperationsBucket).ForEach(func(key, encoded []byte) error {
+		var operation topology.Operation
+		if encoded == nil || decodeRecord(encoded, &operation) != nil || string(key) != operation.ID || operation.Validate() != nil {
+			return corruptf("topology operation is invalid")
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return tx.Bucket(topologyTombstonesBucket).ForEach(func(key, encoded []byte) error {
+		var tombstone topology.Tombstone
+		if encoded == nil || decodeRecord(encoded, &tombstone) != nil || string(key) != tombstone.ShardID || tombstone.Version != topology.RecordVersion || tombstone.Generation == 0 || !topology.ValidShardID(tombstone.ShardID) || !topology.ValidIdentity(tombstone.Incarnation) {
+			return corruptf("topology tombstone is invalid")
+		}
+		return nil
+	})
 }
 
 func validateTenantRelocation(tx *bolt.Tx) error {

@@ -872,7 +872,67 @@ Queues, FIFO groups, redrive edges, move tasks, receipts, quotas, and encrypted
 payloads for one tenant MUST move together. M8 MUST NOT split queues across
 shards or decrypt payloads during transfer.
 
-## 20. Required M0 evidence
+## 20. Elastic topology invariants
+
+### TOP-001: Cluster identity is immutable
+
+Dynamic catalog generations MUST retain the manifest-v2 cluster identity and
+default shard. A different identity, default shard, or unplanned replica target
+MUST fail before topology state or a snapshot is published.
+
+### TOP-002: Catalog changes never implicitly move stored tenants
+
+Every tenant data operation MUST materialize or observe one explicit ownership
+record. A shard may become READY only after stored legacy tenant digests are
+backfilled. Hashing a changed active set MUST NOT move an existing tenant.
+
+### TOP-003: Assignment is a control-log compare-and-set
+
+The first ownership record fixes shard and epoch 1. Concurrent first requests,
+retries, and newer catalog generations MUST return that first assignment or a
+conflict; they MUST NOT create two assignments.
+
+### TOP-004: Only READY shards receive new tenants
+
+CANDIDATE, DRAINING, and RETIRED shards MUST NOT be selected for a new tenant.
+Existing owners on DRAINING remain routed there until an M8 ownership cutover.
+
+### TOP-005: Selective hosting fails closed
+
+A node without a selected shard MUST NOT fall back to another local repository,
+create local data, or claim leadership. It may return only retryable
+unavailability and a bounded configured entry hint.
+
+### TOP-006: Activation is deployment-assisted and monotonic
+
+Only a manifest-planned CANDIDATE may become READY. Catalog generation MUST
+increase atomically with activation, and a READY shard MUST NOT return to
+CANDIDATE.
+
+### TOP-007: Drain reuses fenced ownership transfer
+
+Drain MUST stop new assignment before moving data, run at most one tenant M8
+migration per topology operation, and retire only after zero ownership records
+name the shard. It MUST NOT copy live keys or dual write.
+
+### TOP-008: Retired identities never alias new storage
+
+Retirement MUST durably tombstone shard ID and incarnation. No later catalog,
+manifest, restore, or operation may reuse either identity.
+
+### TOP-009: Topology progress is durable and idempotent
+
+Operation phase, cursor, and active migration reference MUST be replicated.
+After process or leader failure, retry MUST resume or return the already
+completed result without skipping a required M8 phase.
+
+### TOP-010: Control-plane loss limits availability, not ownership safety
+
+Existing explicit owners may continue only through their correct active epoch.
+New tenant assignment and topology mutation MUST fail closed without the control
+quorum. Stale catalog state MUST NOT authorize an unknown generation or shard.
+
+## 21. Required M0 evidence
 
 M0 MUST include automated evidence for at least the following cases:
 
@@ -896,7 +956,7 @@ go test ./...
 go test -race ./...
 ```
 
-## 21. Required M1-B evidence
+## 22. Required M1-B evidence
 
 M1-B MUST add automated evidence for at least the following cases:
 
@@ -920,7 +980,7 @@ unissued, cross-queue, receive/change race, and delete/change race cases against
 both the memory and bbolt repositories. Timing proofs use explicit timestamps or
 injected clocks and never correctness sleeps.
 
-## 22. Required M1-D evidence
+## 23. Required M1-D evidence
 
 M1-D MUST add automated evidence for at least the following cases:
 
@@ -947,7 +1007,7 @@ injected clock. Migration fixtures MUST prove that pre-existing lifecycle and
 receipt data are semantically unchanged apart from record-version and newly
 initialized attribute fields.
 
-## 23. Required M1-E evidence
+## 24. Required M1-E evidence
 
 M1-E MUST add automated evidence for at least the following cases:
 
@@ -970,7 +1030,7 @@ Long-poll timing tests use an injected service clock and controllable timer.
 They do not use sleeps as correctness evidence. The shared repository suite
 checks lifecycle transition hints against both memory and bbolt.
 
-## 24. Required M1-F evidence
+## 25. Required M1-F evidence
 
 M1-F MUST add automated evidence for at least the following cases:
 
@@ -992,7 +1052,7 @@ Batch conformance MUST execute the same semantic suite against memory and bbolt.
 Failure tests MUST distinguish request-level no-mutation errors from HTTP 200
 entry-level results. No test may infer batch-wide atomicity or exactly-once retry.
 
-## 25. Required M3 evidence
+## 26. Required M3 evidence
 
 M3 MUST add automated evidence for at least the following cases:
 
@@ -1010,7 +1070,7 @@ M3 MUST add automated evidence for at least the following cases:
 | Strict HTTP shapes and errors expose no message, receipt, task internals, or path | API-001–API-004, API-007, SEC-001–SEC-003 |
 | Race detector covers policy, receive transfer, cancellation, and worker progress | CON-001, DLQ-001–DLQ-004 |
 
-## 26. Required M7 evidence
+## 27. Required M7 evidence
 
 M7 MUST add automated evidence for at least the following cases:
 
@@ -1024,7 +1084,7 @@ M7 MUST add automated evidence for at least the following cases:
 | Three nodes host two Raft groups and both preserve FIFO after one node fails | FIFO-001–FIFO-004, CLU-004, SHD-003, SHD-004 |
 | Tenant delete uses the public queue generation while receipts remain scoped | QUEUE-007, RCP-001–RCP-003, SHD-003 |
 
-## 27. Required M8 evidence
+## 28. Required M8 evidence
 
 M8 MUST add automated evidence for at least the following cases:
 
@@ -1039,7 +1099,22 @@ M8 MUST add automated evidence for at least the following cases:
 | Pre-cutover abort restores only the original source epoch | REL-001, REL-002, REL-007 |
 | Three-node/two-shard FIFO relocation preserves order across leader failure | FIFO-001–FIFO-004, CLU-004, REL-002, REL-008 |
 
-## 28. Forbidden implementation shortcuts
+## 29. Required M9 evidence
+
+M9 MUST add automated evidence for at least the following cases:
+
+| Test scenario | Invariants demonstrated |
+|---|---|
+| Schema-v10 migrates to v11 with validated backup and snapshot state | DUR-003–DUR-006, TOP-001, TOP-009 |
+| Concurrent first-use assignment stores one epoch-1 owner | REL-001, TOP-002, TOP-003 |
+| Backfill plus candidate activation leaves every existing tenant in place | REL-001, TOP-002, TOP-006 |
+| New tenants use READY shards and never CANDIDATE/DRAINING/RETIRED | TOP-003, TOP-004 |
+| A node omitting the tenant shard returns an entry hint without local writes | SHD-003, TOP-005 |
+| Interrupted activation and drain resume idempotently after leader failure | CLU-007, REL-007, TOP-007, TOP-009 |
+| Drain preserves FIFO order and retires only after the final owner moves | FIFO-001–FIFO-004, REL-008, TOP-007 |
+| Retired shard ID/incarnation reuse and stale restore are rejected | CLU-012, TOP-001, TOP-008 |
+
+## 30. Forbidden implementation shortcuts
 
 The following approaches violate this document unless the specification is
 explicitly changed:
@@ -1079,8 +1154,14 @@ explicitly changed:
 - Unfreezing a source after ownership has committed to the destination.
 - Capturing tenant data before the durable source fence in a different
   transaction.
+- Adding a READY shard to rendezvous inputs before explicit legacy assignment
+  coverage is complete.
+- Treating a non-hosted shard as an empty local repository or silently routing
+  it to the default shard.
+- Retiring a shard while an ownership record or unfinished migration names it.
+- Reusing a retired shard ID, incarnation, or on-disk directory.
 
-## 29. Changing an invariant
+## 31. Changing an invariant
 
 An invariant may change only when all of the following are present:
 

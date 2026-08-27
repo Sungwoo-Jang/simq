@@ -1076,6 +1076,81 @@ epochs, phase, bundle hash, and the API URL of the leader required for the next
 step. These APIs never return a bundle, queue name, message data, receipt,
 plaintext tenant, encryption key, filesystem path, or internal error.
 
+### M9: Elastic shard topology
+
+M9 replaces the fixed active shard set with a replicated logical catalog while
+retaining the M7 placement and M8 ownership safety boundaries. Manifest version
+2 contains an immutable 32-character lowercase hexadecimal `cluster_id`, the
+unchanged default shard, and all reviewed candidate replica plans. Each shard
+declares initial state `READY` or `CANDIDATE`. Manifest version 1 remains a
+compatibility input whose existing catalog revision is its cluster identity and
+whose shards are all READY.
+
+The default shard is immutable and remains local on every API node. A node may
+omit non-default replicas. Every possible default-shard voter MUST remain a
+replica of every data shard so any control leader has a replicated observation
+path for M8 migration phases. An omitted shard is never opened locally. Requests
+for it return retryable unavailability plus a configured hosting-node entry URL;
+the hosting node returns the exact Raft leader when necessary.
+
+#### Explicit tenant directory
+
+The control FSM stores directory mode `LEGACY`, `BACKFILLING`, or `EXPLICIT`.
+Before a tenant data operation, an absent ownership record is compare-and-set to
+epoch 1. In LEGACY or BACKFILLING mode the selected shard is the M8 rendezvous
+result over the initial READY set. In EXPLICIT mode a previously unseen tenant
+is assigned deterministically across the current READY set. A retry returns the
+first assignment and never recomputes it from a newer generation.
+
+Backfill enumerates stored tenant digests in bounded pages, writes their legacy
+assignments idempotently, and commits EXPLICIT only after every initial shard is
+complete. Candidate activation MUST reject an incomplete backfill. Operations
+that race the final barrier serialize through the control log: assignment before
+the barrier uses the old set; assignment afterward may use the new READY set and
+has no pre-existing data.
+
+#### Catalog and shard lifecycle
+
+The catalog has a positive monotonic generation, stable cluster ID and default
+shard, directory mode, and lexically sorted shard records. Each shard has a
+stable ID, 32-character incarnation, configured entry API URL, and state
+`CANDIDATE`, `READY`, `DRAINING`, or `RETIRED`.
+
+Only a reviewed CANDIDATE whose planned Raft group is already provisioned may
+advance to READY. The generation increments in the same control transaction.
+READY and DRAINING shards remain valid existing owners, but only READY shards
+receive new tenants. Drain is resumable and selects one explicit owner at a
+time, uses the M8 migration state machine to move it to a READY destination,
+and continues after failures. Retirement requires zero owners and no unfinished
+migration. It commits a permanent tombstone; the ID and incarnation cannot be
+activated again. Physical replica removal and file deletion occur only after
+retirement through the existing reviewed deployment and membership procedures.
+
+Topology operations have unique `to_` plus 32 lowercase hexadecimal IDs and
+phases `PLANNED`, `RUNNING`, `COMPLETED`, or pre-activation `ABORTED`. Retrying a
+phase is idempotent. Abort may cancel candidate activation before READY or a
+drain before its first tenant cutover; completed M8 cutovers are never rolled
+back.
+
+#### M9 administration
+
+The cluster administrator token protects:
+
+```text
+GET  /v1/cluster/topology
+GET  /v1/cluster/topology/operations
+GET  /v1/cluster/topology/operations/status?OperationId=<id>
+POST /v1/cluster/topology/backfill
+POST /v1/cluster/topology/shards/activate
+POST /v1/cluster/topology/shards/drain
+POST /v1/cluster/topology/operations/advance
+POST /v1/cluster/topology/operations/abort
+```
+
+Responses expose only bounded catalog, operation, shard, generation, and next
+leader/entry metadata. They never expose tenant IDs, queue or message data,
+receipts, bundle contents, secrets, filesystem paths, or internal errors.
+
 ## 13. Health endpoints
 
 Health endpoints are operational APIs and do not use SQS action names.

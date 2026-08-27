@@ -17,7 +17,8 @@ import (
 
 const (
 	replicatedCommandProtocolVersionV1 uint32 = 1
-	replicatedCommandProtocolVersion   uint32 = 2
+	replicatedCommandProtocolVersionV2 uint32 = 2
+	replicatedCommandProtocolVersion   uint32 = 3
 	replicationProposalRecordVersion   uint32 = 1
 	maxReplicationProposals                   = 100_000
 	maxReplicationResponseBytes               = 4 << 20

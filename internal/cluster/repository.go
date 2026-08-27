@@ -19,9 +19,10 @@ import (
 	"simq/internal/ownership"
 	"simq/internal/queue"
 	"simq/internal/storage/boltrepo"
+	"simq/internal/topology"
 )
 
-const commandVersion uint32 = 2
+const commandVersion uint32 = 3
 
 type Config struct {
 	NodeID, BindAddress, AdvertiseAddress, DataDir string
@@ -416,6 +417,7 @@ func errorForCode(code string) error { return knownErrors[code] }
 var knownErrors = map[string]error{
 	"queue_exists": queue.ErrQueueAlreadyExists, "queue_missing": queue.ErrQueueDoesNotExist, "message_id_exists": queue.ErrMessageIDExists, "message_id_unavailable": queue.ErrMessageIDUnavailable, "queue_id_unavailable": queue.ErrQueueIDUnavailable, "receipt_exists": queue.ErrReceiptHandleExists, "receipt_unavailable": queue.ErrReceiptUnavailable, "receipt_invalid": queue.ErrReceiptHandleIsInvalid, "pagination": queue.ErrInvalidPaginationToken, "over_limit": queue.ErrOverLimit, "queue_in_use": queue.ErrQueueInUse, "move_running": queue.ErrMoveTaskAlreadyRunning, "move_not_running": queue.ErrMoveTaskNotRunning, "move_missing": queue.ErrMoveTaskDoesNotExist, "not_dlq": queue.ErrQueueIsNotDeadLetter, "quota": queue.ErrQuotaExceeded,
 	"ownership_conflict": queue.ErrTenantOwnershipConflict, "migration_missing": queue.ErrMigrationDoesNotExist, "migration_exists": queue.ErrMigrationAlreadyExists, "tenant_migrating": queue.ErrTenantMigrating,
+	"topology_missing": queue.ErrTopologyDoesNotExist, "topology_conflict": queue.ErrTopologyConflict,
 }
 
 func decodeInput[T any](raw json.RawMessage) (T, error) {
@@ -599,6 +601,60 @@ func dispatch(local *boltrepo.Repository, cmd command) (any, error) {
 			return nil, e
 		}
 		return nil, local.AbortDestination(v)
+	case "initialize_topology":
+		v, e := decodeInput[topology.Catalog](cmd.Input)
+		if e != nil {
+			return nil, e
+		}
+		return local.InitializeCatalog(v)
+	case "ensure_tenant_assignment":
+		v, e := decodeInput[string](cmd.Input)
+		if e != nil {
+			return nil, e
+		}
+		return local.EnsureAssignment(v)
+	case "begin_topology_operation":
+		v, e := decodeInput[topology.BeginOperationCommand](cmd.Input)
+		if e != nil {
+			return nil, e
+		}
+		return local.BeginTopologyOperation(v)
+	case "apply_topology_backfill":
+		v, e := decodeInput[topology.BackfillBatchCommand](cmd.Input)
+		if e != nil {
+			return nil, e
+		}
+		return local.ApplyBackfillBatch(v)
+	case "complete_topology_backfill":
+		v, e := decodeInput[string](cmd.Input)
+		if e != nil {
+			return nil, e
+		}
+		return local.CompleteBackfill(v)
+	case "activate_topology_shard":
+		v, e := decodeInput[string](cmd.Input)
+		if e != nil {
+			return nil, e
+		}
+		return local.ActivateShard(v)
+	case "update_topology_drain":
+		v, e := decodeInput[topology.DrainProgressCommand](cmd.Input)
+		if e != nil {
+			return nil, e
+		}
+		return local.UpdateDrainProgress(v)
+	case "retire_topology_shard":
+		v, e := decodeInput[string](cmd.Input)
+		if e != nil {
+			return nil, e
+		}
+		return local.RetireShard(v)
+	case "abort_topology_operation":
+		v, e := decodeInput[string](cmd.Input)
+		if e != nil {
+			return nil, e
+		}
+		return local.AbortTopologyOperation(v)
 	default:
 		return nil, fmt.Errorf("unknown replicated operation %q", cmd.Operation)
 	}
@@ -686,6 +742,77 @@ func (r *Repository) AbortSource(migration ownership.Migration) error {
 func (r *Repository) AbortDestination(migration ownership.Migration) error {
 	_, err := mutate[struct{}](r, "abort_tenant_destination", migration)
 	return err
+}
+
+func (r *Repository) Catalog() (topology.Catalog, bool, error) {
+	if err := r.linearizableRead(); err != nil {
+		return topology.Catalog{}, false, err
+	}
+	return r.LocalCatalog()
+}
+func (r *Repository) LocalCatalog() (topology.Catalog, bool, error) {
+	r.core.stateMu.RLock()
+	defer r.core.stateMu.RUnlock()
+	return r.core.local.LocalCatalog()
+}
+func (r *Repository) InitializeCatalog(v topology.Catalog) (topology.Catalog, error) {
+	return mutate[topology.Catalog](r, "initialize_topology", v)
+}
+func (r *Repository) EnsureAssignment(v string) (ownership.Record, error) {
+	return mutate[ownership.Record](r, "ensure_tenant_assignment", v)
+}
+func (r *Repository) OwnersByShard(shard, after string, limit int) ([]ownership.Record, bool, error) {
+	if err := r.linearizableRead(); err != nil {
+		return nil, false, err
+	}
+	r.core.stateMu.RLock()
+	defer r.core.stateMu.RUnlock()
+	return r.core.local.OwnersByShard(shard, after, limit)
+}
+func (r *Repository) Operation(id string) (topology.Operation, bool, error) {
+	if err := r.linearizableRead(); err != nil {
+		return topology.Operation{}, false, err
+	}
+	return r.LocalOperation(id)
+}
+func (r *Repository) LocalOperation(id string) (topology.Operation, bool, error) {
+	r.core.stateMu.RLock()
+	defer r.core.stateMu.RUnlock()
+	return r.core.local.LocalOperation(id)
+}
+func (r *Repository) ListOperations(limit int) ([]topology.Operation, error) {
+	if err := r.linearizableRead(); err != nil {
+		return nil, err
+	}
+	r.core.stateMu.RLock()
+	defer r.core.stateMu.RUnlock()
+	return r.core.local.ListOperations(limit)
+}
+func (r *Repository) BeginTopologyOperation(v topology.BeginOperationCommand) (topology.Operation, error) {
+	return mutate[topology.Operation](r, "begin_topology_operation", v)
+}
+func (r *Repository) ApplyBackfillBatch(v topology.BackfillBatchCommand) (topology.Operation, error) {
+	return mutate[topology.Operation](r, "apply_topology_backfill", v)
+}
+func (r *Repository) CompleteBackfill(id string) (topology.Operation, error) {
+	return mutate[topology.Operation](r, "complete_topology_backfill", id)
+}
+func (r *Repository) ActivateShard(id string) (topology.Operation, error) {
+	return mutate[topology.Operation](r, "activate_topology_shard", id)
+}
+func (r *Repository) UpdateDrainProgress(v topology.DrainProgressCommand) (topology.Operation, error) {
+	return mutate[topology.Operation](r, "update_topology_drain", v)
+}
+func (r *Repository) RetireShard(id string) (topology.Operation, error) {
+	return mutate[topology.Operation](r, "retire_topology_shard", id)
+}
+func (r *Repository) AbortTopologyOperation(id string) (topology.Operation, error) {
+	return mutate[topology.Operation](r, "abort_topology_operation", id)
+}
+func (r *Repository) LocalTenantDigests(after string, limit int) ([]string, bool, error) {
+	r.core.stateMu.RLock()
+	defer r.core.stateMu.RUnlock()
+	return r.core.local.LocalTenantDigests(after, limit)
 }
 
 var _ ownership.ControlStore = (*Repository)(nil)

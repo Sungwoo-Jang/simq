@@ -8,6 +8,7 @@ import (
 
 	"simq/internal/cluster"
 	"simq/internal/queue"
+	"simq/internal/topology"
 )
 
 type ClusterNodeConfig struct {
@@ -21,10 +22,13 @@ type ClusterNodeConfig struct {
 func OpenClustered(manifest Manifest, config ClusterNodeConfig) (*Manager, error) {
 	repositories := make(map[string]queue.Repository, len(manifest.Shards))
 	placements := make(map[string]map[string]Placement, len(manifest.Shards))
+	catalog := topology.Catalog{Version: topology.RecordVersion, ClusterID: manifest.Revision, Generation: 1, DefaultShard: manifest.DefaultShard, DirectoryMode: topology.DirectoryLegacy}
 	for _, shard := range manifest.Shards {
 		local, ok := manifest.LocalReplica(shard, config.NodeID)
 		if !ok {
-			return nil, fmt.Errorf("local node is absent from shard %q", shard.ID)
+			if shard.ID == manifest.DefaultShard {
+				return nil, fmt.Errorf("local node is absent from default shard %q", shard.ID)
+			}
 		}
 		apiURLs := make(map[string]string, len(shard.Replicas))
 		initialVoters := make(map[string]string, len(shard.Replicas))
@@ -33,12 +37,20 @@ func OpenClustered(manifest Manifest, config ClusterNodeConfig) (*Manager, error
 			explicitInitialVoters = explicitInitialVoters || replica.InitialVoter
 		}
 		placements[shard.ID] = make(map[string]Placement, len(shard.Replicas))
+		entryURL := ""
 		for _, replica := range shard.Replicas {
 			apiURLs[replica.NodeID] = replica.APIURL
 			if !explicitInitialVoters || replica.InitialVoter {
 				initialVoters[replica.NodeID] = replica.RaftAddress
 			}
 			placements[shard.ID][replica.NodeID] = Placement{Address: replica.RaftAddress, FailureDomain: replica.FailureDomain}
+			if replica.NodeID == shard.BootstrapNode {
+				entryURL = replica.APIURL
+			}
+		}
+		catalog.Shards = append(catalog.Shards, topology.Shard{ID: shard.ID, Incarnation: shard.Incarnation, State: shard.InitialState, EntryAPIURL: entryURL, Initial: shard.InitialState == topology.ShardReady})
+		if !ok {
+			continue
 		}
 		repository, err := cluster.Open(cluster.Config{
 			NodeID:             config.NodeID,
@@ -64,5 +76,5 @@ func OpenClustered(manifest Manifest, config ClusterNodeConfig) (*Manager, error
 		}
 		repositories[shard.ID] = repository
 	}
-	return New(Config{DefaultShard: manifest.DefaultShard, CatalogRevision: manifest.Revision, Repositories: repositories, Placements: placements})
+	return New(Config{DefaultShard: manifest.DefaultShard, CatalogRevision: manifest.Revision, Repositories: repositories, Placements: placements, TopologyCatalog: &catalog})
 }

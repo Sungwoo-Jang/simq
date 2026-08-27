@@ -16,12 +16,58 @@ import (
 )
 
 func deleteM8Buckets(tx *bolt.Tx) error {
-	for _, name := range [][]byte{tenantOwnershipBucket, tenantMigrationsBucket, tenantFencesBucket, tenantBundlesBucket} {
+	for _, name := range [][]byte{tenantOwnershipBucket, tenantMigrationsBucket, tenantFencesBucket, tenantBundlesBucket, topologyCatalogBucket, topologyOperationsBucket, topologyTombstonesBucket} {
 		if err := tx.DeleteBucket(name); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func TestOpenMigratesSchemaV10ToV11AndKeepsBackup(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "simq.db")
+	repository, err := Open(Config{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := bolt.Open(path, 0o600, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Update(func(tx *bolt.Tx) error {
+		for _, name := range [][]byte{topologyCatalogBucket, topologyOperationsBucket, topologyTombstonesBucket} {
+			if err := tx.DeleteBucket(name); err != nil {
+				return err
+			}
+		}
+		protocol := make([]byte, 4)
+		binary.BigEndian.PutUint32(protocol, replicatedCommandProtocolVersionV2)
+		if err := tx.Bucket(metadataBucket).Put(commandProtocolVersionKey, protocol); err != nil {
+			return err
+		}
+		version := make([]byte, 4)
+		binary.BigEndian.PutUint32(version, schemaVersionV10)
+		return tx.Bucket(metadataBucket).Put(schemaVersionKey, version)
+	}); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	repository, err = Open(Config{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateV10Backup(path + schemaV10BackupSuffix); err != nil {
+		t.Fatalf("validate schema-v10 backup: %v", err)
+	}
 }
 
 func TestOpenMigratesValidSchemaV1AndKeepsBackup(t *testing.T) {

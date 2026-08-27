@@ -21,6 +21,7 @@ import (
 
 	simqclock "simq/internal/clock"
 	"simq/internal/ownership"
+	"simq/internal/topology"
 )
 
 const (
@@ -252,6 +253,63 @@ func (s *Service) AbortTenantMigration(id string) (ownership.Status, error) {
 		return ownership.Status{}, ErrRepositoryUnavailable
 	}
 	return repository.AbortTenantMigration(id)
+}
+
+func (s *Service) TopologyCatalog() (topology.Catalog, error) {
+	repository, ok := s.repository.(TopologyAdminRepository)
+	if !ok {
+		return topology.Catalog{}, ErrRepositoryUnavailable
+	}
+	return repository.TopologyCatalog()
+}
+func (s *Service) TopologyOperationStatus(id string) (topology.Status, error) {
+	repository, ok := s.repository.(TopologyAdminRepository)
+	if !ok {
+		return topology.Status{}, ErrRepositoryUnavailable
+	}
+	return repository.TopologyOperationStatus(id)
+}
+func (s *Service) ListTopologyOperations(limit int) ([]topology.Operation, error) {
+	repository, ok := s.repository.(TopologyAdminRepository)
+	if !ok {
+		return nil, ErrRepositoryUnavailable
+	}
+	return repository.ListTopologyOperations(limit)
+}
+func (s *Service) BeginTopologyBackfill(id string) (topology.Operation, error) {
+	repository, ok := s.repository.(TopologyAdminRepository)
+	if !ok {
+		return topology.Operation{}, ErrRepositoryUnavailable
+	}
+	return repository.BeginTopologyBackfill(id)
+}
+func (s *Service) BeginShardActivation(id, shard string) (topology.Operation, error) {
+	repository, ok := s.repository.(TopologyAdminRepository)
+	if !ok {
+		return topology.Operation{}, ErrRepositoryUnavailable
+	}
+	return repository.BeginShardActivation(id, shard)
+}
+func (s *Service) BeginShardDrain(id, shard string) (topology.Operation, error) {
+	repository, ok := s.repository.(TopologyAdminRepository)
+	if !ok {
+		return topology.Operation{}, ErrRepositoryUnavailable
+	}
+	return repository.BeginShardDrain(id, shard)
+}
+func (s *Service) AdvanceTopologyOperation(id string) (topology.Status, error) {
+	repository, ok := s.repository.(TopologyAdminRepository)
+	if !ok {
+		return topology.Status{}, ErrRepositoryUnavailable
+	}
+	return repository.AdvanceTopologyOperation(id)
+}
+func (s *Service) AbortTopologyOperation(id string) (topology.Status, error) {
+	repository, ok := s.repository.(TopologyAdminRepository)
+	if !ok {
+		return topology.Status{}, ErrRepositoryUnavailable
+	}
+	return repository.AbortTopologyOperation(id)
 }
 
 // WithOperationID returns a request-scoped service sharing all process state

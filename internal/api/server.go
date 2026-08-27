@@ -23,6 +23,7 @@ import (
 	"simq/internal/observability"
 	"simq/internal/ownership"
 	"simq/internal/queue"
+	"simq/internal/topology"
 )
 
 const defaultMaxBodyBytes int64 = 2 << 20
@@ -363,6 +364,127 @@ func (s *Server) serveClusterAdmin(response http.ResponseWriter, request *http.R
 		return
 	}
 	switch {
+	case request.Method == http.MethodGet && request.URL.Path == "/v1/cluster/topology":
+		catalog, err := s.queueService.TopologyCatalog()
+		if err != nil {
+			s.writeTopologyError(response, requestID, topology.Status{}, err)
+			return
+		}
+		writeJSON(response, http.StatusOK, struct {
+			Catalog   topology.Catalog `json:"Catalog"`
+			RequestID string           `json:"RequestId"`
+		}{catalog, requestID})
+	case request.Method == http.MethodGet && request.URL.Path == "/v1/cluster/topology/operations":
+		limit := 100
+		if raw := request.URL.Query().Get("Limit"); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil || parsed < 1 || parsed > 1000 {
+				writeError(response, http.StatusBadRequest, "InvalidRequest", "Limit must be from 1 through 1000.", requestID)
+				return
+			}
+			limit = parsed
+		}
+		operations, err := s.queueService.ListTopologyOperations(limit)
+		if err != nil {
+			s.writeTopologyError(response, requestID, topology.Status{}, err)
+			return
+		}
+		writeJSON(response, http.StatusOK, struct {
+			Operations []topology.Operation `json:"Operations"`
+			RequestID  string               `json:"RequestId"`
+		}{operations, requestID})
+	case request.Method == http.MethodGet && request.URL.Path == "/v1/cluster/topology/operations/status":
+		status, err := s.queueService.TopologyOperationStatus(request.URL.Query().Get("OperationId"))
+		if err != nil {
+			s.writeTopologyError(response, requestID, status, err)
+			return
+		}
+		writeJSON(response, http.StatusOK, struct {
+			Status    topology.Status `json:"Status"`
+			RequestID string          `json:"RequestId"`
+		}{status, requestID})
+	case request.Method == http.MethodPost && request.URL.Path == "/v1/cluster/topology/backfill":
+		var input struct {
+			OperationID string `json:"OperationId"`
+		}
+		if !decodeStrictAdminJSON(response, request, requestID, &input) {
+			return
+		}
+		operation, err := s.queueService.BeginTopologyBackfill(input.OperationID)
+		if err != nil {
+			s.writeTopologyError(response, requestID, topology.Status{}, err)
+			return
+		}
+		writeJSON(response, http.StatusOK, struct {
+			Operation topology.Operation `json:"Operation"`
+			RequestID string             `json:"RequestId"`
+		}{operation, requestID})
+	case request.Method == http.MethodPost && request.URL.Path == "/v1/cluster/topology/shards/activate":
+		var input struct {
+			OperationID string `json:"OperationId"`
+			ShardID     string `json:"ShardId"`
+		}
+		if !decodeStrictAdminJSON(response, request, requestID, &input) {
+			return
+		}
+		operation, err := s.queueService.BeginShardActivation(input.OperationID, input.ShardID)
+		if err != nil {
+			s.writeTopologyError(response, requestID, topology.Status{}, err)
+			return
+		}
+		writeJSON(response, http.StatusOK, struct {
+			Operation topology.Operation `json:"Operation"`
+			RequestID string             `json:"RequestId"`
+		}{operation, requestID})
+	case request.Method == http.MethodPost && request.URL.Path == "/v1/cluster/topology/shards/drain":
+		var input struct {
+			OperationID string `json:"OperationId"`
+			ShardID     string `json:"ShardId"`
+		}
+		if !decodeStrictAdminJSON(response, request, requestID, &input) {
+			return
+		}
+		operation, err := s.queueService.BeginShardDrain(input.OperationID, input.ShardID)
+		if err != nil {
+			s.writeTopologyError(response, requestID, topology.Status{}, err)
+			return
+		}
+		writeJSON(response, http.StatusOK, struct {
+			Operation topology.Operation `json:"Operation"`
+			RequestID string             `json:"RequestId"`
+		}{operation, requestID})
+	case request.Method == http.MethodPost && request.URL.Path == "/v1/cluster/topology/operations/advance":
+		var input struct {
+			OperationID string `json:"OperationId"`
+		}
+		if !decodeStrictAdminJSON(response, request, requestID, &input) {
+			return
+		}
+		status, err := s.queueService.AdvanceTopologyOperation(input.OperationID)
+		if err != nil {
+			s.writeTopologyError(response, requestID, status, err)
+			return
+		}
+		writeJSON(response, http.StatusOK, struct {
+			Status    topology.Status `json:"Status"`
+			RequestID string          `json:"RequestId"`
+		}{status, requestID})
+	case request.Method == http.MethodPost && request.URL.Path == "/v1/cluster/topology/operations/abort":
+		var input struct {
+			OperationID string `json:"OperationId"`
+		}
+		if !decodeStrictAdminJSON(response, request, requestID, &input) {
+			return
+		}
+		status, err := s.queueService.AbortTopologyOperation(input.OperationID)
+		if err != nil {
+			s.writeTopologyError(response, requestID, status, err)
+			return
+		}
+		writeJSON(response, http.StatusOK, struct {
+			Status    topology.Status `json:"Status"`
+			RequestID string          `json:"RequestId"`
+		}{status, requestID})
 	case request.Method == http.MethodGet && request.URL.Path == "/v1/cluster/tenant-migrations":
 		limit := 100
 		if raw := request.URL.Query().Get("Limit"); raw != "" {
@@ -471,7 +593,7 @@ func (s *Server) serveClusterAdmin(response http.ResponseWriter, request *http.R
 			MinCommandVersion uint32 `json:"MinCommandVersion"`
 			MaxCommandVersion uint32 `json:"MaxCommandVersion"`
 			RequestID         string `json:"RequestId"`
-		}{2, 2, requestID})
+		}{3, 3, requestID})
 	case request.Method == http.MethodGet && request.URL.Path == "/v1/cluster/members":
 		members, err := s.queueService.ClusterMembers()
 		if err != nil {
@@ -491,7 +613,7 @@ func (s *Server) serveClusterAdmin(response http.ResponseWriter, request *http.R
 			return
 		}
 		adding := input.Action == "add-voter" || input.Action == "add-nonvoter"
-		compatible := !adding || (input.MinCommandVersion != nil && input.MaxCommandVersion != nil && *input.MinCommandVersion <= 2 && *input.MaxCommandVersion >= 2)
+		compatible := !adding || (input.MinCommandVersion != nil && input.MaxCommandVersion != nil && *input.MinCommandVersion <= 3 && *input.MaxCommandVersion >= 3)
 		if input.NodeID == "" || adding && input.RaftAddress == "" || !compatible {
 			writeError(response, http.StatusBadRequest, "InvalidRequest", "A valid Action, NodeId, and required RaftAddress are required.", requestID)
 			return
@@ -516,7 +638,7 @@ func (s *Server) serveClusterAdmin(response http.ResponseWriter, request *http.R
 			return
 		}
 		adding := input.Action == "add-voter" || input.Action == "add-nonvoter"
-		compatible := !adding || input.MinCommandVersion != nil && input.MaxCommandVersion != nil && *input.MinCommandVersion <= 2 && *input.MaxCommandVersion >= 2
+		compatible := !adding || input.MinCommandVersion != nil && input.MaxCommandVersion != nil && *input.MinCommandVersion <= 3 && *input.MaxCommandVersion >= 3
 		if input.ShardID == "" || input.NodeID == "" || adding && input.RaftAddress == "" || !compatible {
 			writeError(response, http.StatusBadRequest, "InvalidRequest", "Valid ShardId, Action, NodeId, protocol range, and required RaftAddress are required.", requestID)
 			return
@@ -592,6 +714,25 @@ func (s *Server) writeTenantMigrationError(response http.ResponseWriter, request
 		writeStorageUnavailable(response, requestID)
 	default:
 		writeError(response, http.StatusInternalServerError, "InternalError", "The migration request could not be completed.", requestID)
+	}
+}
+
+func (s *Server) writeTopologyError(response http.ResponseWriter, requestID string, status topology.Status, err error) {
+	if status.NextLeaderURL != "" {
+		response.Header().Set("X-SimQ-Leader", status.NextLeaderURL)
+	}
+	var invalid *queue.InvalidRequestError
+	switch {
+	case errors.As(err, &invalid):
+		writeError(response, http.StatusBadRequest, "InvalidRequest", invalid.Error(), requestID)
+	case errors.Is(err, queue.ErrTopologyDoesNotExist):
+		writeError(response, http.StatusNotFound, "TopologyOperationDoesNotExist", "The topology operation does not exist.", requestID)
+	case errors.Is(err, queue.ErrTopologyConflict), errors.Is(err, queue.ErrTenantOwnershipConflict), errors.Is(err, queue.ErrMigrationAlreadyExists):
+		writeError(response, http.StatusConflict, "TopologyConflict", "The topology operation conflicts with authoritative state.", requestID)
+	case errors.Is(err, queue.ErrRepositoryUnavailable):
+		writeStorageUnavailable(response, requestID)
+	default:
+		writeError(response, http.StatusInternalServerError, "InternalError", "The topology request could not be completed.", requestID)
 	}
 }
 

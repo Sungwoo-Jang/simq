@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"simq/internal/ownership"
+	"simq/internal/topology"
 )
 
 var (
@@ -34,6 +35,8 @@ var (
 	ErrTenantOwnershipConflict = errors.New("tenant ownership epoch or shard conflicts with the requested transition")
 	ErrMigrationDoesNotExist   = errors.New("tenant migration does not exist")
 	ErrMigrationAlreadyExists  = errors.New("tenant migration already exists")
+	ErrTopologyDoesNotExist    = errors.New("topology operation does not exist")
+	ErrTopologyConflict        = errors.New("topology state conflicts with the requested transition")
 )
 
 type Repository interface {
@@ -126,6 +129,18 @@ type TenantMigrationAdminRepository interface {
 	ListTenantMigrations(int) ([]ownership.Migration, error)
 	AdvanceTenantMigration(string) (ownership.Status, error)
 	AbortTenantMigration(string) (ownership.Status, error)
+}
+
+type TopologyAdminRepository interface {
+	Repository
+	TopologyCatalog() (topology.Catalog, error)
+	TopologyOperationStatus(string) (topology.Status, error)
+	ListTopologyOperations(int) ([]topology.Operation, error)
+	BeginTopologyBackfill(string) (topology.Operation, error)
+	BeginShardActivation(string, string) (topology.Operation, error)
+	BeginShardDrain(string, string) (topology.Operation, error)
+	AdvanceTopologyOperation(string) (topology.Status, error)
+	AbortTopologyOperation(string) (topology.Status, error)
 }
 
 type TenantScopedRepository interface {
