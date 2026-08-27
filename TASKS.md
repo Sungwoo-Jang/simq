@@ -367,7 +367,8 @@ of scope.
   timeout, cleanup, results, and bounded text diagnostics.
 - [x] Add path-scoped PR, manual, and weekly heavy operational Actions jobs.
 - [x] Gate 14-day diagnostic artifact upload on a sensitive-value scan.
-- [ ] Pass both heavy jobs on one reviewed GitHub commit.
-- [ ] Pass Go 1.26.7 verification, local supported profiles, and repository
+- [x] Pass both heavy jobs on one reviewed GitHub commit.
+- [x] Pass Go 1.26.7 verification, local supported profiles, and repository
   secret scanning.
-- [ ] Deliver M11 through a feature branch and pull request.
+- [x] Deliver M11 through feature branch
+  `test/m11-continuous-operational-qualification` and pull request #5.

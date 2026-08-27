@@ -1,6 +1,6 @@
 # M11 implementation plan
 
-Status: in progress.
+Status: complete. Delivered in pull request #5.
 
 M11 converts the heavier M10 profiles into continuous operational
 qualification. It does not add or change a public queue action. The milestone
@@ -41,9 +41,9 @@ zones, managed identity, ingress behavior, or production recovery objectives.
   least-privilege permissions and pinned action revisions.
 - [x] M11-E: Scan bounded diagnostics for private keys, JWTs, access tokens,
   and encryption configuration before a 14-day artifact upload.
-- [ ] M11-F: Execute local available profiles and obtain successful secure and
+- [x] M11-F: Execute local available profiles and obtain successful secure and
   kind evidence on the compatible GitHub-hosted Linux runner.
-- [ ] M11-G: Pass the Go 1.26.7 verification gate, secret scan, and deliver
+- [x] M11-G: Pass the Go 1.26.7 verification gate, secret scan, and deliver
   through a feature-branch pull request.
 
 ## Completion boundary
@@ -52,3 +52,10 @@ M11 is complete when both heavy jobs pass on the same reviewed commit, the
 fast PR workflow remains green, diagnostics contain no sensitive-value
 patterns, and local supported checks pass. Scheduled runs provide fresh
 evidence after merge; their future success cannot be claimed in advance.
+
+Reviewed commit `2ef7b45` passed all jobs in GitHub Actions runs
+[`33059767444`](https://github.com/Sungwoo-Jang/simq/actions/runs/33059767444)
+and
+[`33059767309`](https://github.com/Sungwoo-Jang/simq/actions/runs/33059767309).
+The heavy run retained only the secret-scanned secure and kind diagnostic
+artifacts.
