@@ -11,8 +11,8 @@ the orchestration boundary:
 
 - Docker Engine and Compose v2 run isolated local process and network faults.
 - GitHub Actions uses `actions/checkout` revision
-  `11d5960a326750d5838078e36cf38b85af677262` (v4) and `actions/setup-go`
-  revision `40f1582b2485089dde7abd97c1529aa768e1baff` (v5).
+  `fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09` (v5) and `actions/setup-go`
+  revision `924ae3a1cded613372ab5595356fb5720e22ba16` (v6).
 - Prometheus 3.12.0 `promtool` validates alert syntax and deterministic rule
   behavior from container digest
   `sha256:69f5241418838263316593f7274a304b095c40bcf22e57272865da91bd60a8ac`.
