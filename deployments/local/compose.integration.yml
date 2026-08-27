@@ -1,0 +1,98 @@
+name: simq-integration
+
+x-simq-common: &simq-common
+  image: simq:integration
+  build:
+    context: ../..
+    dockerfile: Dockerfile
+  init: true
+  restart: "no"
+  stop_grace_period: 10s
+  environment: &simq-environment
+    SIMQ_ADDR: ":9324"
+    SIMQ_PUBLIC_BASE_URL: "http://localhost:19324"
+    SIMQ_STORAGE: "bbolt"
+    SIMQ_DATA_PATH: "/var/lib/simq/standalone.db"
+    SIMQ_CLUSTER_INITIAL_VOTERS: "n1=172.31.250.11:7000,n2=172.31.250.12:7000,n3=172.31.250.13:7000"
+    SIMQ_CLUSTER_API_URLS: "n1=http://localhost:19324,n2=http://localhost:19325,n3=http://localhost:19326"
+    SIMQ_CLUSTER_ADMIN_TOKEN: "local-integration-admin"
+    SIMQ_RETENTION_SWEEP_INTERVAL: "1h"
+  healthcheck:
+    test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:9324/healthz"]
+    interval: 1s
+    timeout: 2s
+    retries: 30
+    start_period: 2s
+  networks: [simq]
+
+services:
+  n2:
+    <<: *simq-common
+    hostname: n2
+    environment:
+      <<: *simq-environment
+      SIMQ_CLUSTER_NODE_ID: "n2"
+      SIMQ_CLUSTER_BIND: "0.0.0.0:7000"
+      SIMQ_CLUSTER_ADVERTISE: "172.31.250.12:7000"
+      SIMQ_CLUSTER_DATA_DIR: "/var/lib/simq/cluster"
+      SIMQ_CLUSTER_BOOTSTRAP: "false"
+    ports:
+      - "127.0.0.1:19325:9324"
+    volumes:
+      - n2-data:/var/lib/simq
+    networks:
+      simq:
+        ipv4_address: 172.31.250.12
+
+  n3:
+    <<: *simq-common
+    hostname: n3
+    environment:
+      <<: *simq-environment
+      SIMQ_CLUSTER_NODE_ID: "n3"
+      SIMQ_CLUSTER_BIND: "0.0.0.0:7000"
+      SIMQ_CLUSTER_ADVERTISE: "172.31.250.13:7000"
+      SIMQ_CLUSTER_DATA_DIR: "/var/lib/simq/cluster"
+      SIMQ_CLUSTER_BOOTSTRAP: "false"
+    ports:
+      - "127.0.0.1:19326:9324"
+    volumes:
+      - n3-data:/var/lib/simq
+    networks:
+      simq:
+        ipv4_address: 172.31.250.13
+
+  n1:
+    <<: *simq-common
+    hostname: n1
+    depends_on:
+      n2:
+        condition: service_healthy
+      n3:
+        condition: service_healthy
+    environment:
+      <<: *simq-environment
+      SIMQ_CLUSTER_NODE_ID: "n1"
+      SIMQ_CLUSTER_BIND: "0.0.0.0:7000"
+      SIMQ_CLUSTER_ADVERTISE: "172.31.250.11:7000"
+      SIMQ_CLUSTER_DATA_DIR: "/var/lib/simq/cluster"
+      SIMQ_CLUSTER_BOOTSTRAP: "true"
+    ports:
+      - "127.0.0.1:19324:9324"
+    volumes:
+      - n1-data:/var/lib/simq
+    networks:
+      simq:
+        ipv4_address: 172.31.250.11
+
+networks:
+  simq:
+    name: simq-integration
+    ipam:
+      config:
+        - subnet: 172.31.250.0/24
+
+volumes:
+  n1-data:
+  n2-data:
+  n3-data:
