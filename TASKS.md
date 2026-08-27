@@ -314,3 +314,31 @@ or moving an existing tenant between shard IDs remains deliberately unsupported.
 M8 is complete. M1-M7 semantics remain preserved. Dynamic shard-ID changes,
 selective shard hosting, and tenant bundles larger than 16 MiB remain outside
 the M8 boundary.
+
+## M9: elastic shard topology
+
+- [x] Specify manifest v2, immutable cluster and shard incarnations, explicit
+  directory modes, catalog generations, and candidate/ready/draining/retired
+  transitions in ADR 0013, `SPEC.md`, and `INVARIANTS.md`.
+- [x] Migrate schema v10 to v11 with topology catalog, operation, and permanent
+  tombstone buckets plus a validated schema-v10 backup.
+- [x] Replicate topology command protocol version 3 and preserve its state in
+  complete FSM snapshots and proposal replay.
+- [x] CAS first-use tenant assignment and batch-backfill stored tenant digests
+  before any candidate can become ready.
+- [x] Open only locally planned data groups, keep the default control shard
+  local, and return reviewed remote entry hints without local fallback.
+- [x] Activate candidates without moving existing owners; drain one owner at a
+  time through M8 before retirement and reject shard-ID reuse.
+- [x] Add strict token-protected topology catalog, operation, backfill,
+  activation, drain, advance, and abort APIs.
+- [x] Cover deterministic selection, schema upgrade, manifest safety, explicit
+  assignment, selective hosting, activation, drain, FIFO data preservation,
+  retirement, API strictness, and existing three-node failover.
+- [x] Document the operating sequence and pass the Go 1.26.7 verification gate
+  before delivery through a feature-branch pull request.
+
+M9 is complete. New catalog generations affect only unseen tenants; existing
+tenants move only through an epoch-fenced M8 relocation. Automatic balancing,
+tenant splitting, unreviewed endpoints, and physical shard deletion remain out
+of scope.

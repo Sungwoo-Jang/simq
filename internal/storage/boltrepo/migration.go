@@ -15,16 +15,30 @@ import (
 )
 
 const (
-	schemaV1BackupSuffix = ".schema-v1.bak"
-	schemaV2BackupSuffix = ".schema-v2.bak"
-	schemaV3BackupSuffix = ".schema-v3.bak"
-	schemaV4BackupSuffix = ".schema-v4.bak"
-	schemaV5BackupSuffix = ".schema-v5.bak"
-	schemaV6BackupSuffix = ".schema-v6.bak"
-	schemaV7BackupSuffix = ".schema-v7.bak"
-	schemaV8BackupSuffix = ".schema-v8.bak"
-	schemaV9BackupSuffix = ".schema-v9.bak"
+	schemaV1BackupSuffix  = ".schema-v1.bak"
+	schemaV2BackupSuffix  = ".schema-v2.bak"
+	schemaV3BackupSuffix  = ".schema-v3.bak"
+	schemaV4BackupSuffix  = ".schema-v4.bak"
+	schemaV5BackupSuffix  = ".schema-v5.bak"
+	schemaV6BackupSuffix  = ".schema-v6.bak"
+	schemaV7BackupSuffix  = ".schema-v7.bak"
+	schemaV8BackupSuffix  = ".schema-v8.bak"
+	schemaV9BackupSuffix  = ".schema-v9.bak"
+	schemaV10BackupSuffix = ".schema-v10.bak"
 )
+
+func migrateV10Database(db *bolt.DB, path string) error {
+	if err := db.View(func(tx *bolt.Tx) error { return callTransactionSafely(tx, validateTransactionV10) }); err != nil {
+		return err
+	}
+	if err := ensureMigrationBackup(db, path, schemaV10BackupSuffix, validateV10Backup); err != nil {
+		return fmt.Errorf("create schema version 10 backup: %w", err)
+	}
+	if err := db.Update(func(tx *bolt.Tx) error { return callTransactionSafely(tx, migrateV10Transaction) }); err != nil {
+		return fmt.Errorf("migrate schema version 10: %w", err)
+	}
+	return nil
+}
 
 func migrateV9Database(db *bolt.DB, path string) error {
 	if err := db.View(func(tx *bolt.Tx) error { return callTransactionSafely(tx, validateTransactionV9) }); err != nil {
@@ -216,6 +230,9 @@ func validateV6Backup(path string) error { return validateMigrationBackup(path, 
 func validateV7Backup(path string) error { return validateMigrationBackup(path, validateTransactionV7) }
 func validateV8Backup(path string) error { return validateMigrationBackup(path, validateTransactionV8) }
 func validateV9Backup(path string) error { return validateMigrationBackup(path, validateTransactionV9) }
+func validateV10Backup(path string) error {
+	return validateMigrationBackup(path, validateTransactionV10)
+}
 
 func validateMigrationBackup(path string, validate func(*bolt.Tx) error) error {
 	info, err := os.Lstat(path)
@@ -535,6 +552,29 @@ func migrateV9Transaction(tx *bolt.Tx) error {
 		return corruptf("unsupported schema version %d", version)
 	}
 	for _, name := range [][]byte{tenantOwnershipBucket, tenantMigrationsBucket, tenantFencesBucket, tenantBundlesBucket} {
+		if _, err := tx.CreateBucket(name); err != nil {
+			return err
+		}
+	}
+	protocol := make([]byte, 4)
+	binary.BigEndian.PutUint32(protocol, replicatedCommandProtocolVersionV2)
+	if err := tx.Bucket(metadataBucket).Put(commandProtocolVersionKey, protocol); err != nil {
+		return err
+	}
+	encoded := make([]byte, 4)
+	binary.BigEndian.PutUint32(encoded, schemaVersionV10)
+	return tx.Bucket(metadataBucket).Put(schemaVersionKey, encoded)
+}
+
+func migrateV10Transaction(tx *bolt.Tx) error {
+	version, err := transactionSchemaVersion(tx)
+	if err != nil {
+		return err
+	}
+	if version != schemaVersionV10 {
+		return corruptf("unsupported schema version %d", version)
+	}
+	for _, name := range [][]byte{topologyCatalogBucket, topologyOperationsBucket, topologyTombstonesBucket} {
 		if _, err := tx.CreateBucket(name); err != nil {
 			return err
 		}

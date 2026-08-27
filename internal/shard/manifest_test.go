@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"simq/internal/topology"
 )
 
 func validManifest() Manifest {
@@ -51,5 +53,39 @@ func TestLoadManifestRejectsEveryKindOfTrailingContent(t *testing.T) {
 		if _, err := LoadManifest(path, "n1"); err == nil {
 			t.Fatalf("accepted trailing suffix %q", suffix)
 		}
+	}
+}
+
+func TestManifestV2AllowsSelectiveHostingButRequiresEveryControlVoter(t *testing.T) {
+	manifest := validManifest()
+	manifest.Version = ManifestVersionV2
+	manifest.ClusterID = "00112233445566778899aabbccddeeff"
+	for index := range manifest.Shards {
+		manifest.Shards[index].Incarnation = []string{"11112222333344445555666677778888", "9999aaaabbbbccccddddeeeeffff0000"}[index]
+		manifest.Shards[index].InitialState = topology.ShardCandidate
+		for replicaIndex := range manifest.Shards[index].Replicas {
+			manifest.Shards[index].Replicas[replicaIndex].InitialVoter = true
+		}
+	}
+	for index := range manifest.Shards {
+		if manifest.Shards[index].ID == "s0" {
+			manifest.Shards[index].InitialState = topology.ShardReady
+			manifest.Shards[index].Replicas = append(manifest.Shards[index].Replicas, ReplicaManifest{NodeID: "n4", RaftAddress: "127.0.0.1:12004", APIURL: "https://n4", FailureDomain: "az-d"})
+		}
+	}
+	if err := manifest.Validate("n4"); err != nil {
+		t.Fatalf("selective manifest: %v", err)
+	}
+	if manifest.Revision != manifest.ClusterID {
+		t.Fatalf("revision=%q", manifest.Revision)
+	}
+	broken := manifest
+	for index := range broken.Shards {
+		if broken.Shards[index].ID == "s1" {
+			broken.Shards[index].Replicas = broken.Shards[index].Replicas[1:]
+		}
+	}
+	if err := broken.Validate("n4"); err == nil {
+		t.Fatal("manifest omitted a default-shard voter from candidate shard")
 	}
 }

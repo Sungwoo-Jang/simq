@@ -13,6 +13,7 @@ import (
 
 	"simq/internal/ownership"
 	"simq/internal/queue"
+	"simq/internal/topology"
 )
 
 const tenantNamespaceLength = 68
@@ -22,6 +23,7 @@ type Config struct {
 	CatalogRevision string
 	Repositories    map[string]queue.Repository
 	Placements      map[string]map[string]Placement
+	TopologyCatalog *topology.Catalog
 }
 
 type Placement struct{ Address, FailureDomain string }
@@ -34,6 +36,10 @@ type Manager struct {
 	closeOnce       *sync.Once
 	closeErr        *error
 	placements      map[string]map[string]Placement
+	topologySeed    *topology.Catalog
+	initialShardIDs []string
+	entryURLs       map[string]string
+	topologyStore   topology.ControlStore
 }
 
 func New(config Config) (*Manager, error) {
@@ -55,7 +61,32 @@ func New(config Config) (*Manager, error) {
 		ids = append(ids, id)
 		copyRepositories[id] = repository
 	}
+	initialIDs := append([]string(nil), ids...)
+	entries := make(map[string]string)
+	var seed *topology.Catalog
+	if config.TopologyCatalog != nil {
+		copyCatalog := *config.TopologyCatalog
+		copyCatalog.Shards = append([]topology.Shard(nil), config.TopologyCatalog.Shards...)
+		if err := copyCatalog.Canonicalize(); err != nil {
+			return nil, fmt.Errorf("invalid topology catalog: %w", err)
+		}
+		seed = &copyCatalog
+		ids, initialIDs = nil, nil
+		for _, planned := range copyCatalog.Shards {
+			ids = append(ids, planned.ID)
+			entries[planned.ID] = planned.EntryAPIURL
+			if planned.Initial {
+				initialIDs = append(initialIDs, planned.ID)
+			}
+		}
+		for id := range copyRepositories {
+			if _, ok := topology.FindShard(copyCatalog, id); !ok {
+				return nil, fmt.Errorf("local shard %q is absent from topology catalog", id)
+			}
+		}
+	}
 	sort.Strings(ids)
+	sort.Strings(initialIDs)
 	revision := config.CatalogRevision
 	if revision == "" {
 		hash := sha256.Sum256([]byte(strings.Join(ids, "\x00") + "\x00" + config.DefaultShard))
@@ -63,7 +94,8 @@ func New(config Config) (*Manager, error) {
 	}
 	closeOnce := &sync.Once{}
 	var closeErr error
-	return &Manager{defaultShard: config.DefaultShard, catalogRevision: revision, repositories: copyRepositories, shardIDs: ids, closeOnce: closeOnce, closeErr: &closeErr, placements: clonePlacements(config.Placements)}, nil
+	topologyStore, _ := copyRepositories[config.DefaultShard].(topology.ControlStore)
+	return &Manager{defaultShard: config.DefaultShard, catalogRevision: revision, repositories: copyRepositories, shardIDs: ids, closeOnce: closeOnce, closeErr: &closeErr, placements: clonePlacements(config.Placements), topologySeed: seed, initialShardIDs: initialIDs, entryURLs: entries, topologyStore: topologyStore}, nil
 }
 
 func clonePlacements(source map[string]map[string]Placement) map[string]map[string]Placement {
@@ -101,9 +133,13 @@ func tenantDigest(key string) (string, bool) {
 }
 
 func (m *Manager) hashedShardID(digest string) string {
-	selected := m.shardIDs[0]
+	candidates := m.initialShardIDs
+	if len(candidates) == 0 {
+		candidates = m.shardIDs
+	}
+	selected := candidates[0]
 	var best uint64
-	for index, id := range m.shardIDs {
+	for index, id := range candidates {
 		score := sha256.Sum256([]byte(digest + "\x00" + id))
 		value := binary.BigEndian.Uint64(score[:8])
 		if index == 0 || value > best {
@@ -125,13 +161,40 @@ func (m *Manager) routeForKey(key string) (shardID, digest string, epoch uint64,
 			return "", digest, 0, false, readErr
 		}
 		if found {
-			if _, configured := m.repositories[record.ShardID]; !configured {
+			if !m.knownShard(record.ShardID) {
 				return "", digest, 0, true, fmt.Errorf("%w: ownership references an unknown shard", queue.ErrRepositoryCorrupt)
 			}
 			return record.ShardID, digest, record.Epoch, true, nil
 		}
 	}
+	if m.topologySeed != nil {
+		return m.defaultShard, digest, 0, false, nil
+	}
 	return m.hashedShardID(digest), digest, 1, false, nil
+}
+
+func (m *Manager) knownShard(id string) bool {
+	for _, candidate := range m.shardIDs {
+		if candidate == id {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Manager) ensureCatalog() (topology.Catalog, bool, error) {
+	if m.topologySeed == nil {
+		return topology.Catalog{}, false, nil
+	}
+	control := m.topologyStore
+	if control == nil {
+		return topology.Catalog{}, false, queue.ErrRepositoryUnavailable
+	}
+	if current, found, err := control.LocalCatalog(); err != nil || found {
+		return current, found, err
+	}
+	initialized, err := control.InitializeCatalog(*m.topologySeed)
+	return initialized, err == nil, err
 }
 
 func (m *Manager) shardIDForKey(key string) string {
@@ -155,7 +218,24 @@ func (m *Manager) activeRepositoryForKey(key string) (queue.Repository, error) {
 	if err != nil {
 		return nil, err
 	}
-	repository := m.repositories[shardID]
+	if digest != "" && !explicit && m.topologySeed != nil {
+		if _, _, err := m.ensureCatalog(); err != nil {
+			return nil, err
+		}
+		control := m.topologyStore
+		if control == nil {
+			return nil, queue.ErrRepositoryUnavailable
+		}
+		record, err := control.EnsureAssignment(digest)
+		if err != nil {
+			return nil, err
+		}
+		shardID, epoch, explicit = record.ShardID, record.Epoch, true
+	}
+	repository, hosted := m.repositories[shardID]
+	if !hosted {
+		return nil, &RemoteShardError{ShardID: shardID, LeaderURL: m.entryURLs[shardID]}
+	}
 	if digest == "" {
 		return repository, nil
 	}
@@ -168,7 +248,7 @@ func (m *Manager) activeRepositoryForKey(key string) (queue.Repository, error) {
 		return nil, err
 	}
 	if !found {
-		if !explicit || epoch == 1 && shardID == m.hashedShardID(digest) {
+		if !explicit || epoch == 1 {
 			return repository, nil
 		}
 		return nil, queue.ErrTenantMigrating
@@ -312,8 +392,7 @@ func (m *Manager) ChangeVisibility(v queue.ChangeVisibilityCommand) error {
 }
 func (m *Manager) Expire(v queue.ExpireCommand) (int, error) {
 	total := 0
-	for _, id := range m.shardIDs {
-		repository := m.repositories[id]
+	for _, repository := range m.repositories {
 		if routing, ok := repository.(queue.ClusterRoutingRepository); ok && !routing.IsLeader() {
 			continue
 		}
@@ -326,8 +405,8 @@ func (m *Manager) Expire(v queue.ExpireCommand) (int, error) {
 	return total, nil
 }
 func (m *Manager) Health() error {
-	for _, id := range m.shardIDs {
-		if err := m.repositories[id].Health(); err != nil {
+	for id, repository := range m.repositories {
+		if err := repository.Health(); err != nil {
 			return fmt.Errorf("shard %s: %w", id, err)
 		}
 	}
@@ -335,9 +414,9 @@ func (m *Manager) Health() error {
 }
 func (m *Manager) Close() error {
 	m.closeOnce.Do(func() {
-		values := make([]error, 0, len(m.shardIDs))
-		for _, id := range m.shardIDs {
-			values = append(values, m.repositories[id].Close())
+		values := make([]error, 0, len(m.repositories))
+		for _, repository := range m.repositories {
+			values = append(values, repository.Close())
 		}
 		*m.closeErr = errors.Join(values...)
 	})
@@ -381,8 +460,7 @@ func (m *Manager) MoveTaskStep(handle string, now time.Time) (queue.MoveTaskStep
 }
 func (m *Manager) RunningMoveTasks() ([]queue.MessageMoveTask, error) {
 	result := []queue.MessageMoveTask{}
-	for _, id := range m.shardIDs {
-		repository := m.repositories[id]
+	for _, repository := range m.repositories {
 		if routing, ok := repository.(queue.ClusterRoutingRepository); ok && !routing.IsLeader() {
 			continue
 		}
@@ -408,7 +486,7 @@ func (m *Manager) ForOperation(id string) queue.Repository {
 			repositories[shardID] = repository
 		}
 	}
-	return &Manager{defaultShard: m.defaultShard, catalogRevision: m.catalogRevision, repositories: repositories, shardIDs: append([]string(nil), m.shardIDs...), closeOnce: m.closeOnce, closeErr: m.closeErr, placements: m.placements}
+	return &Manager{defaultShard: m.defaultShard, catalogRevision: m.catalogRevision, repositories: repositories, shardIDs: append([]string(nil), m.shardIDs...), closeOnce: m.closeOnce, closeErr: m.closeErr, placements: m.placements, topologySeed: m.topologySeed, initialShardIDs: append([]string(nil), m.initialShardIDs...), entryURLs: m.entryURLs, topologyStore: m.topologyStore}
 }
 func (m *Manager) Clustered() bool { return true }
 func (m *Manager) RouteForKey(key string) (bool, bool, string) {
@@ -416,7 +494,10 @@ func (m *Manager) RouteForKey(key string) (bool, bool, string) {
 	if err != nil {
 		return true, false, ""
 	}
-	repository := m.repositories[shardID]
+	repository, hosted := m.repositories[shardID]
+	if !hosted {
+		return true, false, m.entryURLs[shardID]
+	}
 	routing, ok := repository.(queue.ClusterRoutingRepository)
 	if !ok {
 		return false, true, ""
@@ -587,6 +668,11 @@ func (e *MigrationLeaderError) Error() string {
 	return "tenant migration step must use the required shard leader"
 }
 func (e *MigrationLeaderError) Unwrap() error { return queue.ErrRepositoryUnavailable }
+
+type RemoteShardError struct{ ShardID, LeaderURL string }
+
+func (e *RemoteShardError) Error() string { return "tenant shard is not hosted by this node" }
+func (e *RemoteShardError) Unwrap() error { return queue.ErrRepositoryUnavailable }
 
 func (m *Manager) AdvanceTenantMigration(id string) (ownership.Status, error) {
 	status, err := m.TenantMigrationStatus(id)
@@ -793,10 +879,13 @@ func (m *Manager) shardAdmin(id string) (queue.ClusterAdminRepository, error) {
 func (m *Manager) ShardStatuses() []queue.ShardStatus {
 	result := make([]queue.ShardStatus, 0, len(m.shardIDs))
 	for _, id := range m.shardIDs {
-		routing, _ := m.repositories[id].(queue.ClusterRoutingRepository)
+		repository, hosted := m.repositories[id]
+		routing, _ := repository.(queue.ClusterRoutingRepository)
 		status := queue.ShardStatus{ID: id, CatalogRevision: m.catalogRevision}
 		if routing != nil {
 			status.Leader, status.LeaderURL = routing.IsLeader(), routing.LeaderAPIURL()
+		} else if !hosted {
+			status.LeaderURL = m.entryURLs[id]
 		}
 		result = append(result, status)
 	}
@@ -904,8 +993,8 @@ func (m *Manager) TriggerShardSnapshot(id string) error {
 	return v.TriggerClusterSnapshot()
 }
 func (m *Manager) SetStorageQuota(quota queue.StorageQuota) {
-	for _, id := range m.shardIDs {
-		if value, ok := m.repositories[id].(queue.StorageQuotaRepository); ok {
+	for _, repository := range m.repositories {
+		if value, ok := repository.(queue.StorageQuotaRepository); ok {
 			value.SetStorageQuota(quota)
 		}
 	}

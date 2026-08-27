@@ -2,7 +2,9 @@
 
 SimQ is a Go queue service with durable Standard and FIFO queues, visibility
 timeouts, delayed delivery, dead-letter queues, redrive, tenant isolation,
-encrypted payloads, Raft replication, and fixed-catalog multi-Raft sharding.
+encrypted payloads, Raft replication, and elastic multi-Raft sharding.
+It also supports explicit tenant ownership, reviewed candidate-shard activation,
+selective shard hosting, and resumable shard drain without implicit rehashing.
 
 The HTTP API uses SimQ's JSON action contract. It is intentionally not an AWS
 SQS wire-compatible emulator. Public behavior is defined in `SPEC.md`, while
@@ -47,3 +49,6 @@ go run ./cmd/simq
 
 Stop the process with `Ctrl+C`. Run the complete verification gate with
 `./scripts/verify.sh`, or `./scripts/verify.ps1` on Windows.
+
+Cluster deployment and elastic-shard procedures are documented in
+`docs/shard-operations.md` and `docs/topology-operations.md`.

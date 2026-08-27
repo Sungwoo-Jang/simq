@@ -185,6 +185,15 @@ func Open(config Config) (*Repository, error) {
 			}
 			return closeOnError(err)
 		}
+		actualSchemaVersion = schemaVersionV10
+	}
+	if actualSchemaVersion == schemaVersionV10 {
+		if err := migrateV10Database(db, path); err != nil {
+			if !errors.Is(err, queue.ErrRepositoryCorrupt) {
+				err = unavailable("migrate bbolt repository", err)
+			}
+			return closeOnError(err)
+		}
 		actualSchemaVersion = schemaVersion
 	}
 	if actualSchemaVersion != schemaVersion {
