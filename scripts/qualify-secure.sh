@@ -1,7 +1,6 @@
 #!/usr/bin/env sh
 set -eu
 
-umask 077
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 runner="$project_root/scripts/secure-integration.sh"
 source_dir="$project_root/.cache/integration-secure"

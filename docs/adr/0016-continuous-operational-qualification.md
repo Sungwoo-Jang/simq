@@ -18,8 +18,8 @@ The workflow pins these reviewed inputs:
   `fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09`;
 - `actions/setup-go` v6 at
   `924ae3a1cded613372ab5595356fb5720e22ba16`;
-- `actions/upload-artifact` v5 at
-  `330a01c490aca151604b8cf639adc76d48f6c5d4`;
+- `actions/upload-artifact` v6 at
+  `b7c566a772e6b6bfb58ed0dc250532a479d7789f`;
 - kind v0.20.0 and Kubernetes v1.27.3 at the image digest recorded in ADR
   0015;
 - kubectl v1.27.3 with SHA-256
