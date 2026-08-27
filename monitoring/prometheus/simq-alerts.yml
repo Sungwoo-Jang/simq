@@ -1,0 +1,42 @@
+groups:
+  - name: simq-availability
+    rules:
+      - alert: SimQTargetDown
+        expr: up{job="simq"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: SimQ metrics target is down
+          description: Prometheus has been unable to scrape this SimQ target for two minutes.
+
+      - alert: SimQNoReadyLeader
+        expr: probe_success{job="simq-ready"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: SimQ leader service is not ready
+          description: The black-box readiness probe cannot reach a leader-fenced ready endpoint.
+
+      - alert: SimQServerErrors
+        expr: sum by (instance) (increase(simq_http_requests_total{result="5xx"}[5m])) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: SimQ is returning server errors
+          description: At least one authenticated queue request returned a 5xx response in the last five minutes.
+
+      - alert: SimQHighAverageRequestLatency
+        expr: |
+          sum by (instance) (rate(simq_http_request_duration_seconds_total[5m]))
+          /
+          clamp_min(sum by (instance) (rate(simq_http_requests_total[5m])), 0.001)
+          > 0.5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: SimQ average request latency is high
+          description: Mean authenticated queue-request latency has exceeded 500 ms for two minutes.

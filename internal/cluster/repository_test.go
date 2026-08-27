@@ -155,6 +155,35 @@ func TestDurableRaftAndFSMRestart(t *testing.T) {
 	}
 }
 
+func TestBootstrapRetainsStableDNSAdvertiseAddress(t *testing.T) {
+	address := freeAddress(t)
+	_, port, err := net.SplitHostPort(address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	advertise := net.JoinHostPort("localhost", port)
+	node, err := Open(Config{
+		NodeID:           "n1",
+		BindAddress:      address,
+		AdvertiseAddress: advertise,
+		DataDir:          t.TempDir(),
+		Bootstrap:        true,
+		InitialVoters:    map[string]string{"n1": advertise},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer node.Close()
+	waitFor(t, "DNS-advertised leader", func() bool { return node.State() == raft.Leader })
+	configuration, err := node.Configuration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(configuration.Servers) != 1 || configuration.Servers[0].Address != raft.ServerAddress(advertise) {
+		t.Fatalf("configuration=%+v want address %q", configuration, advertise)
+	}
+}
+
 func TestReplicatedCommandCarriesLeaderStorageQuota(t *testing.T) {
 	root := t.TempDir()
 	address := freeAddress(t)

@@ -2,6 +2,10 @@
 
 set -eu
 
+# bbolt intentionally rejects group/world-accessible data directories. Keep
+# test-created temporary directories on the same 0700 boundary on Unix hosts.
+umask 077
+
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$project_root"
 

@@ -1,0 +1,162 @@
+name: simq-secure-integration
+
+x-simq-secure: &simq-secure
+  image: simq:secure-integration
+  build:
+    context: ../..
+    dockerfile: Dockerfile
+  init: true
+  restart: "no"
+  stop_grace_period: 10s
+  env_file:
+    - ../../.cache/integration-secure/fixtures/environment.env
+  environment: &simq-secure-environment
+    SSL_CERT_FILE: "/run/simq/ca.pem"
+    SIMQ_ADDR: ":9324"
+    SIMQ_PUBLIC_BASE_URL: "https://localhost:19424"
+    SIMQ_STORAGE: "bbolt"
+    SIMQ_DATA_PATH: "/var/lib/simq/standalone.db"
+    SIMQ_SHARD_MANIFEST: "/run/simq/manifest.json"
+    SIMQ_SECURITY_MODE: "oidc"
+    SIMQ_OIDC_ISSUER: "https://issuer:8443"
+    SIMQ_OIDC_AUDIENCE: "simq-m10"
+    SIMQ_TLS_CERT_FILE: "/run/simq/api.pem"
+    SIMQ_TLS_KEY_FILE: "/run/simq/api-key.pem"
+    SIMQ_CLUSTER_TLS_CERT_FILE: "/run/simq/raft.pem"
+    SIMQ_CLUSTER_TLS_KEY_FILE: "/run/simq/raft-key.pem"
+    SIMQ_CLUSTER_TLS_CA_FILE: "/run/simq/ca.pem"
+    SIMQ_CLUSTER_TLS_SERVER_NAME: "simq-cluster"
+    SIMQ_LEGACY_TENANT: "m10-no-legacy"
+    SIMQ_TENANT_MAX_QUEUES: "100"
+    SIMQ_TENANT_MAX_MESSAGES: "10000"
+    SIMQ_TENANT_MAX_PAYLOAD_BYTES: "67108864"
+    SIMQ_TENANT_REQUESTS_PER_SECOND: "1000"
+    SIMQ_TENANT_REQUEST_BURST: "1000"
+    SIMQ_AUDIT_PATH: "/var/lib/simq/audit.jsonl"
+    SIMQ_RETENTION_SWEEP_INTERVAL: "1h"
+  healthcheck:
+    test: ["CMD", "wget", "--no-check-certificate", "-q", "-O", "-", "https://127.0.0.1:9324/healthz"]
+    interval: 1s
+    timeout: 2s
+    retries: 45
+    start_period: 3s
+  volumes:
+    - ../../.cache/integration-secure/fixtures/ca.pem:/run/simq/ca.pem:ro
+    - ../../.cache/integration-secure/fixtures/api.pem:/run/simq/api.pem:ro
+    - ../../.cache/integration-secure/fixtures/api-key.pem:/run/simq/api-key.pem:ro
+    - ../../.cache/integration-secure/fixtures/raft.pem:/run/simq/raft.pem:ro
+    - ../../.cache/integration-secure/fixtures/raft-key.pem:/run/simq/raft-key.pem:ro
+    - ../../.cache/integration-secure/fixtures/manifest.json:/run/simq/manifest.json:ro
+
+services:
+  issuer:
+    image: simq-test-issuer:integration
+    build:
+      context: ../..
+      dockerfile: deployments/local/Dockerfile.fixture
+    command: ["serve", "-directory", "/run/simq", "-listen", ":8443", "-issuer", "https://issuer:8443"]
+    restart: "no"
+    volumes:
+      - ../../.cache/integration-secure/fixtures/issuer.pem:/run/simq/issuer.pem:ro
+      - ../../.cache/integration-secure/fixtures/issuer-key.pem:/run/simq/issuer-key.pem:ro
+      - ../../.cache/integration-secure/fixtures/jwks.json:/run/simq/jwks.json:ro
+    healthcheck:
+      test: ["CMD", "wget", "--no-check-certificate", "-q", "-O", "-", "https://127.0.0.1:8443/healthz"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+    networks: [client]
+
+  n2:
+    <<: *simq-secure
+    hostname: n2
+    depends_on:
+      issuer:
+        condition: service_healthy
+    environment:
+      <<: *simq-secure-environment
+      SIMQ_CLUSTER_NODE_ID: "n2"
+      SIMQ_CLUSTER_DATA_DIR: "/var/lib/simq/cluster"
+    ports:
+      - "127.0.0.1:19425:9324"
+    volumes:
+      - ../../.cache/integration-secure/fixtures/ca.pem:/run/simq/ca.pem:ro
+      - ../../.cache/integration-secure/fixtures/api.pem:/run/simq/api.pem:ro
+      - ../../.cache/integration-secure/fixtures/api-key.pem:/run/simq/api-key.pem:ro
+      - ../../.cache/integration-secure/fixtures/raft.pem:/run/simq/raft.pem:ro
+      - ../../.cache/integration-secure/fixtures/raft-key.pem:/run/simq/raft-key.pem:ro
+      - ../../.cache/integration-secure/fixtures/manifest.json:/run/simq/manifest.json:ro
+      - n2-data:/var/lib/simq
+    networks:
+      client:
+      raft:
+        aliases: [n2-raft]
+
+  n3:
+    <<: *simq-secure
+    hostname: n3
+    depends_on:
+      issuer:
+        condition: service_healthy
+    environment:
+      <<: *simq-secure-environment
+      SIMQ_CLUSTER_NODE_ID: "n3"
+      SIMQ_CLUSTER_DATA_DIR: "/var/lib/simq/cluster"
+    ports:
+      - "127.0.0.1:19426:9324"
+    volumes:
+      - ../../.cache/integration-secure/fixtures/ca.pem:/run/simq/ca.pem:ro
+      - ../../.cache/integration-secure/fixtures/api.pem:/run/simq/api.pem:ro
+      - ../../.cache/integration-secure/fixtures/api-key.pem:/run/simq/api-key.pem:ro
+      - ../../.cache/integration-secure/fixtures/raft.pem:/run/simq/raft.pem:ro
+      - ../../.cache/integration-secure/fixtures/raft-key.pem:/run/simq/raft-key.pem:ro
+      - ../../.cache/integration-secure/fixtures/manifest.json:/run/simq/manifest.json:ro
+      - n3-data:/var/lib/simq
+    networks:
+      client:
+      raft:
+        aliases: [n3-raft]
+
+  n1:
+    <<: *simq-secure
+    hostname: n1
+    depends_on:
+      issuer:
+        condition: service_healthy
+      n2:
+        condition: service_healthy
+      n3:
+        condition: service_healthy
+    environment:
+      <<: *simq-secure-environment
+      SIMQ_CLUSTER_NODE_ID: "n1"
+      SIMQ_CLUSTER_DATA_DIR: "/var/lib/simq/cluster"
+    ports:
+      - "127.0.0.1:19424:9324"
+    volumes:
+      - ../../.cache/integration-secure/fixtures/ca.pem:/run/simq/ca.pem:ro
+      - ../../.cache/integration-secure/fixtures/api.pem:/run/simq/api.pem:ro
+      - ../../.cache/integration-secure/fixtures/api-key.pem:/run/simq/api-key.pem:ro
+      - ../../.cache/integration-secure/fixtures/raft.pem:/run/simq/raft.pem:ro
+      - ../../.cache/integration-secure/fixtures/raft-key.pem:/run/simq/raft-key.pem:ro
+      - ../../.cache/integration-secure/fixtures/manifest.json:/run/simq/manifest.json:ro
+      - n1-data:/var/lib/simq
+    networks:
+      client:
+      raft:
+        aliases: [n1-raft]
+
+networks:
+  client:
+    name: simq-secure-client
+  raft:
+    name: simq-secure-raft
+    internal: true
+
+volumes:
+  n1-data:
+    name: simq-secure-integration-n1-data
+  n2-data:
+    name: simq-secure-integration-n2-data
+  n3-data:
+    name: simq-secure-integration-n3-data

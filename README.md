@@ -63,3 +63,7 @@ options, ports, cleanup, and tested failure cases are documented in
 
 Cluster deployment and elastic-shard procedures are documented in
 `docs/shard-operations.md` and `docs/topology-operations.md`.
+
+Operational profiles for secure two-shard partitions, offline backup/restore,
+Prometheus alerts, and local Kubernetes leader replacement are documented in
+`docs/operational-validation.md`.

@@ -342,3 +342,19 @@ M9 is complete. New catalog generations affect only unseen tenants; existing
 tenants move only through an epoch-fenced M8 relocation. Automatic balancing,
 tenant splitting, unreviewed endpoints, and physical shard deletion remain out
 of scope.
+
+## M10: operational validation and recovery
+
+- [x] Pin and add PR CI for Go verify, Docker integration, and alert rules.
+- [x] Generate ephemeral OIDC, JWT, API TLS, Raft mTLS, and encryption fixtures.
+- [x] Run a three-node/two-shard manifest-v2 secure Compose environment.
+- [x] Prove minority fencing and majority progress with Raft-only partitioning.
+- [x] Prove offline volume backup and restore into recreated empty volumes.
+- [x] Add deterministic Prometheus SLO alert-rule tests.
+- [x] Support stable-DNS Raft bootstrap and provide a pinned kind profile; the
+  current Windows Docker cgroup v1 host fails its explicit capability check.
+- [x] Capture bounded diagnostics, cleanup, and local/staging evidence limits.
+- [x] Pass Go 1.26.7 verification and every available M10 profile; kind is
+  explicitly unavailable on this workstation's Docker cgroup v1 backend.
+- [x] Deliver through feature branch `test/m10-operational-validation` and
+  pull request #4.
