@@ -122,6 +122,7 @@ purged before enabling OIDC mode and otherwise fail closed.
 | M8 | complete | Epoch-fenced tenant relocation, bounded verified transfer, resumable cutover/abort, and leader-failure recovery |
 | M9 | complete | Explicit tenant directory, manifest-v2 candidate universe, selective hosting, activation, sequential drain, retirement, and permanent tombstones |
 | M10 | complete with host limitation | CI, secure multi-shard failure injection, offline recovery, and tested SLO alerts pass; kind artifacts are complete but this workstation's Docker cgroup v1 cannot run nested kubelet cgroups |
+| M11 | in progress | Repeated scheduled secure/DR qualification, compatible-runner kind/PVC evidence, and secret-gated short-lived diagnostics |
 
 ## Update rules
 

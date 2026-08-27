@@ -1,0 +1,93 @@
+name: operational qualification
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/operational.yml
+      - deployments/kubernetes/**
+      - deployments/local/**
+      - scripts/assert-safe-artifacts.sh
+      - scripts/kind-integration.sh
+      - scripts/qualify-secure.sh
+      - scripts/secure-integration.sh
+      - tests/integration/**
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: operational-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secure-qualification:
+    name: Repeated secure chaos and restore
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SIMQ_SECURE_QUALIFICATION_ITERATIONS: "2"
+      SIMQ_SECURE_QUALIFICATION_TIMEOUT: 10m
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - name: Install Go 1.26.7
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: 1.26.7
+          cache: true
+      - name: Repeat secure chaos and disaster recovery
+        run: ./scripts/qualify-secure.sh
+      - name: Scan secure diagnostics before upload
+        id: secure-artifact-safety
+        if: always()
+        run: ./scripts/assert-safe-artifacts.sh .cache/qualification/secure
+      - name: Add secure qualification summary
+        if: always() && hashFiles('.cache/qualification/secure/summary.md') != ''
+        run: cat .cache/qualification/secure/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload bounded secure diagnostics
+        if: always() && steps.secure-artifact-safety.outcome == 'success'
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        with:
+          name: secure-qualification-${{ github.run_attempt }}
+          path: .cache/qualification/secure
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 14
+
+  kubernetes-qualification:
+    name: kind StatefulSet and PVC recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - name: Install Go 1.26.7
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: 1.26.7
+          cache: true
+      - name: Run pinned kind leader and PVC replacement
+        run: timeout --signal=TERM --kill-after=30s 15m ./scripts/kind-integration.sh
+      - name: Scan kind diagnostics before upload
+        id: kind-artifact-safety
+        if: always()
+        run: ./scripts/assert-safe-artifacts.sh .cache/integration-kind
+      - name: Add kind qualification summary
+        if: always() && hashFiles('.cache/integration-kind/result.txt') != ''
+        run: |
+          echo '### kind operational qualification' >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          cat .cache/integration-kind/result.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload bounded kind diagnostics
+        if: always() && steps.kind-artifact-safety.outcome == 'success'
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        with:
+          name: kind-qualification-${{ github.run_attempt }}
+          path: .cache/integration-kind
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 14
