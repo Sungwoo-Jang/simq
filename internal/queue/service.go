@@ -20,6 +20,7 @@ import (
 	"unicode/utf8"
 
 	simqclock "simq/internal/clock"
+	"simq/internal/ownership"
 )
 
 const (
@@ -211,6 +212,46 @@ func (s *Service) TriggerShardSnapshot(shard string) error {
 		return ErrRepositoryUnavailable
 	}
 	return repository.TriggerShardSnapshot(shard)
+}
+
+func (s *Service) BeginTenantMigration(id, digest, destination string) (ownership.Migration, error) {
+	repository, ok := s.repository.(TenantMigrationAdminRepository)
+	if !ok {
+		return ownership.Migration{}, ErrRepositoryUnavailable
+	}
+	return repository.BeginTenantMigration(id, digest, destination)
+}
+
+func (s *Service) TenantMigrationStatus(id string) (ownership.Status, error) {
+	repository, ok := s.repository.(TenantMigrationAdminRepository)
+	if !ok {
+		return ownership.Status{}, ErrRepositoryUnavailable
+	}
+	return repository.TenantMigrationStatus(id)
+}
+
+func (s *Service) ListTenantMigrations(limit int) ([]ownership.Migration, error) {
+	repository, ok := s.repository.(TenantMigrationAdminRepository)
+	if !ok {
+		return nil, ErrRepositoryUnavailable
+	}
+	return repository.ListTenantMigrations(limit)
+}
+
+func (s *Service) AdvanceTenantMigration(id string) (ownership.Status, error) {
+	repository, ok := s.repository.(TenantMigrationAdminRepository)
+	if !ok {
+		return ownership.Status{}, ErrRepositoryUnavailable
+	}
+	return repository.AdvanceTenantMigration(id)
+}
+
+func (s *Service) AbortTenantMigration(id string) (ownership.Status, error) {
+	repository, ok := s.repository.(TenantMigrationAdminRepository)
+	if !ok {
+		return ownership.Status{}, ErrRepositoryUnavailable
+	}
+	return repository.AbortTenantMigration(id)
 }
 
 // WithOperationID returns a request-scoped service sharing all process state

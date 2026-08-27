@@ -16,10 +16,11 @@ import (
 )
 
 const (
-	replicatedCommandProtocolVersion uint32 = 1
-	replicationProposalRecordVersion uint32 = 1
-	maxReplicationProposals                 = 100_000
-	maxReplicationResponseBytes             = 4 << 20
+	replicatedCommandProtocolVersionV1 uint32 = 1
+	replicatedCommandProtocolVersion   uint32 = 2
+	replicationProposalRecordVersion   uint32 = 1
+	maxReplicationProposals                   = 100_000
+	maxReplicationResponseBytes               = 4 << 20
 )
 
 type replicationProposalRecord struct {

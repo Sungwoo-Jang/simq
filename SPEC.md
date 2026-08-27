@@ -958,7 +958,7 @@ record, redrive edge, move task, proposal replay result, quota counter, and
 encrypted payload for that tenant MUST use that shard. Keys without an M6 tenant
 namespace use the declared default shard for compatibility.
 
-Catalog identity is durable metadata in every schema-v9 shard database and
+Catalog identity is durable metadata in every schema-v9-or-later shard database and
 snapshot. Startup may bind an unbound migrated database once; a subsequently
 different revision, malformed revision, or snapshot from another catalog MUST
 fail before serving or publishing restored state. Adding or removing shard IDs
@@ -1006,6 +1006,75 @@ it to catch up, promote it, and only then demote or remove the old replica.
 M7 provides no API for moving an existing tenant between shard IDs. Such
 resharding requires a later durable ownership and fenced cutover protocol and
 MUST fail closed rather than be emulated by copying storage keys.
+
+### M8: Epoch-fenced tenant relocation
+
+M8 moves one complete secure tenant between two shard IDs already present in
+the bound M7 catalog. It does not change that catalog, add shard IDs, or split
+one tenant's queues. The default shard's Raft FSM is the ownership control
+authority. An absent ownership record means epoch 1 on the M7 rendezvous shard;
+beginning a migration materializes that implicit assignment.
+
+#### Ownership and routing
+
+An ownership record contains the 64-character lowercase tenant digest, shard
+ID, and positive epoch. Public administration never accepts or emits a plaintext
+tenant ID. A routing override always wins over rendezvous hashing. Every queue
+operation verifies the selected shard's local tenant fence before reading or
+mutating data. Frozen, prepared, moved, wrong-shard, and wrong-epoch states
+return retryable `ServiceUnavailable` and MUST NOT fall back to another shard.
+
+Locally applied ownership may temporarily lag the control leader. Safety does
+not depend on a fresh router: after source freeze the source rejects operations,
+and before destination activation the destination rejects operations. Lag may
+therefore reduce availability during cutover but cannot create two writers.
+
+#### Migration protocol
+
+A migration record contains a unique `tm_` plus 32 lowercase hexadecimal ID,
+tenant digest, source and destination shard IDs, source epoch `E`, destination
+epoch `E+1`, phase, bundle hash, and bounded failure information. The phases are
+`FREEZING`, `PREPARING`, `CUTTING_OVER`, `ACTIVATING`, `CLEANING`, `ABORTING`, `COMPLETED`,
+and pre-cutover `ABORTED`.
+
+The source freeze and final bundle capture commit in one source-shard Raft
+entry. No foreground operation, expiry sweep, or move worker may mutate the
+tenant afterward. The bundle includes all queues, messages, order indexes,
+receipts, tombstones, tags, permissions, redrive state, move-task state, FIFO
+state, encrypted payload envelopes, and tenant usage. It excludes shard-global
+metadata and other tenants. Tenant-scoped proposal replay results move with the
+bundle so an ambiguous operation retry remains result-stable after cutover.
+Canonical entry ordering and SHA-256 authenticate
+the bundle, which may not exceed 16 MiB encoded in M8.
+
+The destination imports the whole bundle atomically as PREPARED and serves none
+of it. The control shard then compare-and-swaps `(source,E)` to
+`(destination,E+1)`. Only a matching prepared destination may become ACTIVE.
+The source is then removed atomically and marked MOVED. Repeating any phase with
+the same migration data is idempotent; conflicting migration IDs, hashes,
+epochs, or destinations fail closed.
+
+Abort is allowed only before ownership cutover. It removes prepared destination
+data if present and unfreezes the unchanged source epoch. After cutover, recovery
+MUST finish activation and cleanup rather than restoring the old owner.
+
+#### Administration
+
+The cluster administrator token protects:
+
+```text
+GET  /v1/cluster/tenant-migrations
+GET  /v1/cluster/tenant-migrations/status?MigrationId=<id>
+POST /v1/cluster/tenant-migrations
+POST /v1/cluster/tenant-migrations/advance
+POST /v1/cluster/tenant-migrations/abort
+```
+
+Create accepts `MigrationId`, `TenantDigest`, and `DestinationShard`. Advance
+and abort accept `MigrationId`. Status reports only bounded IDs, shard IDs,
+epochs, phase, bundle hash, and the API URL of the leader required for the next
+step. These APIs never return a bundle, queue name, message data, receipt,
+plaintext tenant, encryption key, filesystem path, or internal error.
 
 ## 13. Health endpoints
 
@@ -1651,7 +1720,5 @@ implementation:
 - Idempotency key format and retention period.
 - Receipt handle encoding and key rotation.
 - Queue URL behavior when `PublicBaseURL` changes.
-- Authentication and tenant identity model.
-- Consensus library and replicated log storage.
-- Queue-to-shard placement and rebalancing.
-- Backup consistency and restore semantics.
+- Dynamic shard-ID catalog changes and selective shard hosting.
+- Standalone export and coordinated multi-shard restore semantics.

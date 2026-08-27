@@ -176,6 +176,15 @@ func Open(config Config) (*Repository, error) {
 			}
 			return closeOnError(err)
 		}
+		actualSchemaVersion = schemaVersionV9
+	}
+	if actualSchemaVersion == schemaVersionV9 {
+		if err := migrateV9Database(db, path); err != nil {
+			if !errors.Is(err, queue.ErrRepositoryCorrupt) {
+				err = unavailable("migrate bbolt repository", err)
+			}
+			return closeOnError(err)
+		}
 		actualSchemaVersion = schemaVersion
 	}
 	if actualSchemaVersion != schemaVersion {
@@ -1079,6 +1088,9 @@ func (r *Repository) Expire(command queue.ExpireCommand) (int, error) {
 			}
 			if tx.Bucket(queuesBucket).Get(queueKey) == nil {
 				return corruptf("message order exists for a missing queue")
+			}
+			if !tenantAllowsBackgroundMutation(tx, string(queueKey)) {
+				return nil
 			}
 			ordered := orders.Bucket(queueKey)
 			cursor := ordered.Cursor()

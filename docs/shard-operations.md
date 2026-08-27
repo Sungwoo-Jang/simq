@@ -87,6 +87,6 @@ catalog revision; the FSM validates it before publication. Prefer replacing a
 lost replica by adding a planned nonvoter and letting Raft catch it up from the
 surviving quorum.
 
-M7 does not implement online tenant resharding. A future implementation must
-use durable ownership epochs, source fencing, verified copy, atomic cutover,
-and rollback; operators must not copy tenant buckets manually.
+M8 adds epoch-fenced movement of a complete tenant between these existing shard
+IDs. Follow `docs/tenant-relocation.md`; operators must not copy tenant buckets
+manually. Dynamic shard-ID changes and selective shard hosting remain deferred.

@@ -532,7 +532,12 @@ func (r *Repository) RunningMoveTasks() ([]queue.MessageMoveTask, error) {
 
 func (r *Repository) ForOperation(id string) queue.Repository {
 	if scoped, ok := r.underlying.(queue.OperationScopedRepository); ok {
-		return &Repository{underlying: scoped.ForOperation(id), namespace: r.namespace, tenantDigest: r.tenantDigest, legacyTenant: r.legacyTenant, bound: r.bound, cipher: r.cipher}
+		scopedID := id
+		if r.bound && r.tenantDigest != "" {
+			digest := sha256.Sum256([]byte(id))
+			scopedID = "td_" + r.tenantDigest + "/" + hex.EncodeToString(digest[:16])
+		}
+		return &Repository{underlying: scoped.ForOperation(scopedID), namespace: r.namespace, tenantDigest: r.tenantDigest, legacyTenant: r.legacyTenant, bound: r.bound, cipher: r.cipher}
 	}
 	return r
 }

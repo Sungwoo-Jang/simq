@@ -23,7 +23,21 @@ const (
 	schemaV6BackupSuffix = ".schema-v6.bak"
 	schemaV7BackupSuffix = ".schema-v7.bak"
 	schemaV8BackupSuffix = ".schema-v8.bak"
+	schemaV9BackupSuffix = ".schema-v9.bak"
 )
+
+func migrateV9Database(db *bolt.DB, path string) error {
+	if err := db.View(func(tx *bolt.Tx) error { return callTransactionSafely(tx, validateTransactionV9) }); err != nil {
+		return err
+	}
+	if err := ensureMigrationBackup(db, path, schemaV9BackupSuffix, validateV9Backup); err != nil {
+		return fmt.Errorf("create schema version 9 backup: %w", err)
+	}
+	if err := db.Update(func(tx *bolt.Tx) error { return callTransactionSafely(tx, migrateV9Transaction) }); err != nil {
+		return fmt.Errorf("migrate schema version 9: %w", err)
+	}
+	return nil
+}
 
 func migrateV8Database(db *bolt.DB, path string) error {
 	if err := db.View(func(tx *bolt.Tx) error { return callTransactionSafely(tx, validateTransactionV8) }); err != nil {
@@ -201,6 +215,7 @@ func validateV5Backup(path string) error { return validateMigrationBackup(path, 
 func validateV6Backup(path string) error { return validateMigrationBackup(path, validateTransactionV6) }
 func validateV7Backup(path string) error { return validateMigrationBackup(path, validateTransactionV7) }
 func validateV8Backup(path string) error { return validateMigrationBackup(path, validateTransactionV8) }
+func validateV9Backup(path string) error { return validateMigrationBackup(path, validateTransactionV9) }
 
 func validateMigrationBackup(path string, validate func(*bolt.Tx) error) error {
 	info, err := os.Lstat(path)
@@ -470,7 +485,7 @@ func migrateV6Transaction(tx *bolt.Tx) error {
 		return err
 	}
 	protocol := make([]byte, 4)
-	binary.BigEndian.PutUint32(protocol, replicatedCommandProtocolVersion)
+	binary.BigEndian.PutUint32(protocol, replicatedCommandProtocolVersionV1)
 	if err := metadata.Put(commandProtocolVersionKey, protocol); err != nil {
 		return err
 	}
@@ -505,6 +520,29 @@ func migrateV8Transaction(tx *bolt.Tx) error {
 	}
 	if version != schemaVersionV8 {
 		return corruptf("unsupported schema version %d", version)
+	}
+	encoded := make([]byte, 4)
+	binary.BigEndian.PutUint32(encoded, schemaVersionV9)
+	return tx.Bucket(metadataBucket).Put(schemaVersionKey, encoded)
+}
+
+func migrateV9Transaction(tx *bolt.Tx) error {
+	version, err := transactionSchemaVersion(tx)
+	if err != nil {
+		return err
+	}
+	if version != schemaVersionV9 {
+		return corruptf("unsupported schema version %d", version)
+	}
+	for _, name := range [][]byte{tenantOwnershipBucket, tenantMigrationsBucket, tenantFencesBucket, tenantBundlesBucket} {
+		if _, err := tx.CreateBucket(name); err != nil {
+			return err
+		}
+	}
+	protocol := make([]byte, 4)
+	binary.BigEndian.PutUint32(protocol, replicatedCommandProtocolVersion)
+	if err := tx.Bucket(metadataBucket).Put(commandProtocolVersionKey, protocol); err != nil {
+		return err
 	}
 	encoded := make([]byte, 4)
 	binary.BigEndian.PutUint32(encoded, schemaVersion)

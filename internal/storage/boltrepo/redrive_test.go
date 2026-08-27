@@ -135,6 +135,9 @@ func TestSchemaV4MigrationCreatesRedriveBucketsAndBackup(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := db.Update(func(tx *bolt.Tx) error {
+		if err := deleteM8Buckets(tx); err != nil {
+			return err
+		}
 		if err := tx.DeleteBucket(tenantUsageBucket); err != nil {
 			return err
 		}

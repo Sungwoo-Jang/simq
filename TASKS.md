@@ -286,3 +286,31 @@ disabled.
 
 M7 is complete. M1-M6 semantics are preserved; changing the fixed shard catalog
 or moving an existing tenant between shard IDs remains deliberately unsupported.
+
+## M8: epoch-fenced tenant relocation
+
+- [x] Record the fixed-catalog relocation protocol, ownership epochs, phase
+  recovery, bundle bound, and single-writer invariants in the specification and
+  ADR 0012.
+- [x] Migrate schema v9 to v10 with validated ownership, migration, local fence,
+  and tenant bundle buckets plus a validated schema-v9 backup.
+- [x] Replicate version-2 control and data commands through each shard's existing
+  Raft FSM and retain proposal replay records in a moved tenant bundle.
+- [x] Route explicit ownership overrides through the default control shard and
+  reject frozen, prepared, moved, stale-epoch, or wrong-shard access.
+- [x] Freeze and capture atomically, prepare and hash-verify atomically, cut over
+  ownership with compare-and-swap, activate destination, and clean source.
+- [x] Make every advance and pre-cutover abort step idempotent and report the
+  next required shard leader to operators.
+- [x] Add cluster-token-protected create, list, status, advance, and abort APIs
+  with strict bounded request decoding.
+- [x] Preserve migration state in complete snapshots and resume through leader
+  failure without exposing two writers.
+- [x] Cover FIFO order, receipts, tenant isolation, abort, return migration,
+  snapshot restore, proposal replay, and three-node/two-shard failover.
+- [x] Document tenant relocation operation and pass `scripts/verify.ps1` with
+  Go 1.26.7 before delivery on a feature branch through a pull request.
+
+M8 is complete. M1-M7 semantics remain preserved. Dynamic shard-ID changes,
+selective shard hosting, and tenant bundles larger than 16 MiB remain outside
+the M8 boundary.
