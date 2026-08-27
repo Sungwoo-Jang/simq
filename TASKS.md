@@ -356,4 +356,5 @@ of scope.
 - [x] Capture bounded diagnostics, cleanup, and local/staging evidence limits.
 - [x] Pass Go 1.26.7 verification and every available M10 profile; kind is
   explicitly unavailable on this workstation's Docker cgroup v1 backend.
-- [ ] Deliver through a feature branch and pull request.
+- [x] Deliver through feature branch `test/m10-operational-validation` and
+  pull request #4.

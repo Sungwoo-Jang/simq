@@ -1,6 +1,7 @@
 # M10 implementation plan
 
-Status: implementation complete; final verification and PR delivery in progress.
+Status: complete with the recorded local kind host limitation. Delivered in
+pull request #4.
 
 M10 turns the M1-M9 correctness suite into a repeatable operational-validation
 platform. It does not widen the public queue API. It proves that reviewed
@@ -51,7 +52,7 @@ from the heavier secure, recovery, alert, and Kubernetes profiles.
   kind execution still requires a cgroup v2-capable host.
 - [x] M10-G: Document local, CI, nightly, release, and staging evidence
   boundaries plus exact cleanup and diagnostics procedures.
-- [ ] M10-H: Pass Go 1.26.7 verify, every available local operational profile,
+- [x] M10-H: Pass Go 1.26.7 verify, every available local operational profile,
   secret scanning, and deliver through a feature-branch pull request.
 
 ## Completion boundary
