@@ -50,5 +50,16 @@ go run ./cmd/simq
 Stop the process with `Ctrl+C`. Run the complete verification gate with
 `./scripts/verify.sh`, or `./scripts/verify.ps1` on Windows.
 
+For a real three-process Raft cluster with persistent Docker volumes and a
+black-box leader-failover test, run:
+
+```powershell
+.\scripts\integration.ps1
+```
+
+On Unix-like systems, use `make integration`. Requirements, retained-cluster
+options, ports, cleanup, and tested failure cases are documented in
+`docs/local-integration-testing.md`.
+
 Cluster deployment and elastic-shard procedures are documented in
 `docs/shard-operations.md` and `docs/topology-operations.md`.

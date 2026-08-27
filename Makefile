@@ -11,3 +11,7 @@ race:
 
 verify:
 	./scripts/verify.sh
+
+.PHONY: integration
+integration:
+	./scripts/integration.sh

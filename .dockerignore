@@ -1,0 +1,9 @@
+.git
+.cache
+data
+*.db
+*.bak
+*.log
+coverage.out
+simq
+simq.exe
