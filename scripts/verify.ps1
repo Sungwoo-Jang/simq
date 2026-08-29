@@ -66,6 +66,23 @@ try {
 
     & $goBinary build -buildvcs=false -o $buildOutput ./cmd/simq
     if ($LASTEXITCODE -ne 0) { throw 'go build failed' }
+
+    Push-Location (Join-Path $projectRoot 'poc\sqssemantics')
+    try {
+        & $goBinary vet ./...
+        if ($LASTEXITCODE -ne 0) { throw 'SQS semantics PoC go vet failed' }
+
+        & $goBinary test ./...
+        if ($LASTEXITCODE -ne 0) { throw 'SQS semantics PoC go test failed' }
+
+        & $goBinary test -race ./...
+        if ($LASTEXITCODE -ne 0) { throw 'SQS semantics PoC go test -race failed' }
+
+        & $goBinary build -buildvcs=false -o (Join-Path $projectRoot '.cache\bin\sqs-poc.exe') ./cmd/sqs-poc
+        if ($LASTEXITCODE -ne 0) { throw 'SQS semantics PoC go build failed' }
+    } finally {
+        Pop-Location
+    }
 } finally {
     Pop-Location
 }

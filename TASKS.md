@@ -372,3 +372,21 @@ of scope.
   secret scanning.
 - [x] Deliver M11 through feature branch
   `test/m11-continuous-operational-qualification` and pull request #5.
+
+## SQS semantics comparative PoC
+
+- [x] Merge the M11 qualified baseline and isolate the PoC on a feature branch.
+- [x] Define six backend-neutral worker semantics and explicit exclusions.
+- [x] Isolate pinned AWS SDK for Go v2 modules in a removable nested module and
+  record dependency, license, maintenance, invariant, and replacement impact.
+- [x] Implement a leader-aware SimQ JSON adapter and a guarded Amazon SQS
+  adapter that uses only the SDK's external credential chain.
+- [x] Add unique disposable queues, bounded contexts, reverse-order cleanup,
+  partial-create cleanup, and redacted JSON results.
+- [x] Pass all six scenarios against a fresh local three-node Raft cluster and
+  add the same profile to pull-request CI.
+- [x] Pass Go 1.26.7 verification and sensitive-value scans, then deliver the
+  PoC through feature branch `test/sqs-semantics-poc` and pull request #6.
+
+The PoC remains comparative semantic evidence, not an AWS wire-compatibility
+milestone. An authorized Amazon SQS account/region run is intentionally pending.

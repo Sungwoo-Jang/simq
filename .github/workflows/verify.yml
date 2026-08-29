@@ -43,11 +43,15 @@ jobs:
           cache: true
       - name: Run process-failure integration profile
         run: ./scripts/integration.sh
+      - name: Run shared SQS semantics against three-node SimQ
+        run: ./scripts/sqs-poc.sh
       - name: Print integration diagnostics after failure
         if: failure()
         run: |
           test ! -f .cache/integration/compose-ps.txt || cat .cache/integration/compose-ps.txt
           test ! -f .cache/integration/compose.log || tail -n 500 .cache/integration/compose.log
+          test ! -f .cache/sqs-poc/simq-report.json || cat .cache/sqs-poc/simq-report.json
+          test ! -f .cache/sqs-poc/compose.log || tail -n 500 .cache/sqs-poc/compose.log
 
   alert-rules:
     name: Prometheus alert rules

@@ -67,3 +67,8 @@ Cluster deployment and elastic-shard procedures are documented in
 Operational profiles for secure two-shard partitions, offline backup/restore,
 Prometheus alerts, and local Kubernetes leader replacement are documented in
 `docs/operational-validation.md`.
+
+To check worker-facing behavior against the same scenarios used for Amazon SQS,
+run `.\scripts\sqs-poc.ps1` on Windows or `make sqs-poc` on Unix. The six
+semantic checks, explicit AWS mutation guard, cleanup rules, and evidence limits
+are documented in `docs/sqs-semantics-poc.md`.

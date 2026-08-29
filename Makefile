@@ -1,4 +1,4 @@
-.PHONY: test race verify
+.PHONY: test race verify sqs-poc
 
 GO_TOOLCHAIN := go1.26.7
 GO_CACHE := $(CURDIR)/.cache/go-build
@@ -31,3 +31,6 @@ kind-integration:
 .PHONY: qualify-secure
 qualify-secure:
 	./scripts/qualify-secure.sh
+
+sqs-poc:
+	./scripts/sqs-poc.sh
