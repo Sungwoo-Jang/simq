@@ -11,7 +11,7 @@ Only behavior backed by automated evidence may be marked complete.
 |---|---|---|
 | Queue model | complete through M9 | Standard and FIFO semantics preserved on standalone, one Raft group, or an explicitly owned elastic tenant shard |
 | Public actions | complete through M4 | All 23 planned SQS-named JSON actions plus FIFO fields are implemented |
-| SQS semantic portability | partial PoC evidence | One shared six-scenario runner passes on local three-node SimQ; the guarded Amazon SQS path is compiled and unit-tested but awaits an authorized account run |
+| SQS semantic portability | partial PoC evidence | One shared six-scenario runner passes on local and CI three-node SimQ; the guarded Amazon SQS path is compiled and unit-tested but awaits an authorized account run |
 | Durability | complete through M9 | Schema-v11 topology catalog, ownership epochs, operation cursors, tombstones, and durable quorum commit per shard |
 | High availability | complete per fixed shard | Three or more voters tolerate one-node failure; placement rejects a single-domain quorum |
 | Multi-tenancy | complete for elastic topology | Verified tenant digest has one explicit epoch-owned, non-aliasing shard namespace |

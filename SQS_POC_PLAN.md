@@ -1,6 +1,6 @@
 # SQS semantics PoC plan
 
-Status: in progress.
+Status: complete. Delivered in pull request #6.
 
 This proof of concept answers a deliberately narrower question than protocol
 compatibility: can the same worker-facing queue semantics be exercised against
@@ -41,7 +41,7 @@ are treated as at-least-once and best-effort ordered.
   using pinned official AWS SDK for Go v2 modules.
 - [x] POC-F: add disposable-resource naming, guaranteed cleanup, bounded
   polling, JSON result output, and an explicit AWS mutation opt-in.
-- [ ] POC-G: run the complete suite against a local three-node SimQ cluster,
+- [x] POC-G: run the complete suite against a local three-node SimQ cluster,
   compile and test the AWS path, run repository verification and secret scans,
   then deliver through a pull request.
 
@@ -52,3 +52,10 @@ SimQ commit and topology. An AWS run proves the same observations for one
 account and region at that time. It does not prove wire/API compatibility,
 capacity, multi-AZ behavior, service quotas, IAM policy correctness, cost,
 latency SLOs, or production recovery objectives.
+
+Reviewed commit `faabe1f` passed the Go 1.26.7 verification, three-node Raft
+integration including all six shared semantic scenarios, and Prometheus alert
+jobs in GitHub Actions run
+[`33248691866`](https://github.com/Sungwoo-Jang/simq/actions/runs/33248691866).
+The Amazon adapter and fail-closed mutation guard are compiled and tested; an
+authorized Amazon SQS account/region execution remains intentionally pending.

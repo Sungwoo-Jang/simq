@@ -385,8 +385,8 @@ of scope.
   partial-create cleanup, and redacted JSON results.
 - [x] Pass all six scenarios against a fresh local three-node Raft cluster and
   add the same profile to pull-request CI.
-- [ ] Pass Go 1.26.7 verification and sensitive-value scans, then deliver the
-  PoC through a feature-branch pull request.
+- [x] Pass Go 1.26.7 verification and sensitive-value scans, then deliver the
+  PoC through feature branch `test/sqs-semantics-poc` and pull request #6.
 
 The PoC remains comparative semantic evidence, not an AWS wire-compatibility
 milestone. An authorized Amazon SQS account/region run is intentionally pending.
