@@ -80,3 +80,29 @@ cluster and namespace, applies the StatefulSet, sends an acknowledged FIFO
 message, force-deletes the current leader Pod, and checks the same message after
 a different Pod becomes ready. The runner captures resources, descriptions,
 and Pod logs before deleting the named cluster.
+
+## Continuous qualification
+
+`.github/workflows/operational.yml` runs the heavy profiles when their direct
+inputs change, on manual dispatch, and at 03:17 UTC every Monday on the default
+branch. The secure job executes two clean end-to-end iterations by default:
+
+```powershell
+.\scripts\qualify-secure.ps1 -Iterations 2
+```
+
+```sh
+make qualify-secure
+```
+
+The Linux runner uses a ten-minute outer timeout per secure iteration. The kind
+runner downloads the reviewed Kubernetes 1.27.3 kubectl rather than relying on
+the mutable runner image and has a fifteen-minute command timeout. GitHub job
+timeouts remain a separate final bound.
+
+Only `before-backup.log`, final Compose logs/status, Kubernetes resources,
+descriptions, Pod logs, and small result summaries enter qualification artifact
+directories. Volume archives, database files, PKI, JWTs, environment files,
+tools, and build caches are excluded. `assert-safe-artifacts.sh` blocks upload
+if a credential-shaped value is detected; passing diagnostics expire after 14
+days.

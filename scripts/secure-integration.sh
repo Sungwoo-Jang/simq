@@ -47,8 +47,8 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 cd "$project_root"
-compose down --volumes --remove-orphans
 "$go_binary" run ./tests/integration/fixture generate -output "$fixture_dir"
+compose down --volumes --remove-orphans
 compose config --quiet
 compose up -d --build
 "$go_binary" test -tags=secureintegration -count=1 -v ./tests/integration -run '^TestSecureMultiShardChaos$'

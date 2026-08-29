@@ -47,11 +47,10 @@ $volumes = @('n1', 'n2', 'n3')
 $completed = $false
 Push-Location $projectRoot
 try {
-    & docker @compose down --volumes --remove-orphans
-    if ($LASTEXITCODE -ne 0) { throw 'failed to reset secure integration resources' }
-
     & $goBinary run ./tests/integration/fixture generate -output $fixtureDir
     if ($LASTEXITCODE -ne 0) { throw 'failed to generate ephemeral security fixtures' }
+    & docker @compose down --volumes --remove-orphans
+    if ($LASTEXITCODE -ne 0) { throw 'failed to reset secure integration resources' }
     & docker @compose config --quiet
     if ($LASTEXITCODE -ne 0) { throw 'secure Compose configuration is invalid' }
 

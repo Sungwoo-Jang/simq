@@ -358,3 +358,17 @@ of scope.
   explicitly unavailable on this workstation's Docker cgroup v1 backend.
 - [x] Deliver through feature branch `test/m10-operational-validation` and
   pull request #4.
+
+## M11: continuous operational qualification
+
+- [x] Merge M10 and isolate M11 on a new feature branch.
+- [x] Pin kubectl to the kind node version on Linux and Windows.
+- [x] Repeat the full secure chaos and offline restore profile with per-run
+  timeout, cleanup, results, and bounded text diagnostics.
+- [x] Add path-scoped PR, manual, and weekly heavy operational Actions jobs.
+- [x] Gate 14-day diagnostic artifact upload on a sensitive-value scan.
+- [x] Pass both heavy jobs on one reviewed GitHub commit.
+- [x] Pass Go 1.26.7 verification, local supported profiles, and repository
+  secret scanning.
+- [x] Deliver M11 through feature branch
+  `test/m11-continuous-operational-qualification` and pull request #5.

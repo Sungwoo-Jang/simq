@@ -118,7 +118,7 @@ func TestKindStatefulSetLeaderReplacement(t *testing.T) {
 
 func kindResourceUID(t *testing.T, contextName, kind, name string) string {
 	t.Helper()
-	output, err := exec.Command("kubectl", "--context", contextName, "-n", "simq-m10", "get", kind, name, "-o", "jsonpath={.metadata.uid}").CombinedOutput()
+	output, err := exec.Command(kindKubectl(), "--context", contextName, "-n", "simq-m10", "get", kind, name, "-o", "jsonpath={.metadata.uid}").CombinedOutput()
 	if err != nil {
 		t.Fatalf("read %s/%s UID: %v\n%s", kind, name, err, output)
 	}
@@ -167,7 +167,7 @@ func decodeKindJSON(t *testing.T, encoded []byte, destination any) {
 func startKindPortForward(t *testing.T, contextName string) *portForward {
 	t.Helper()
 	logs := &lockedBuffer{}
-	command := exec.Command("kubectl", "--context", contextName, "-n", "simq-m10", "port-forward", "service/simq-api", "19524:9324")
+	command := exec.Command(kindKubectl(), "--context", contextName, "-n", "simq-m10", "port-forward", "service/simq-api", "19524:9324")
 	command.Stdout, command.Stderr = logs, logs
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
@@ -209,7 +209,7 @@ func waitKindReadyPod(t *testing.T, contextName, replacedUID string) (string, st
 	t.Helper()
 	deadline := time.Now().Add(kindWait)
 	for time.Now().Before(deadline) {
-		output, err := exec.Command("kubectl", "--context", contextName, "-n", "simq-m10", "get", "pods", "-l", "app=simq", "-o", "json").Output()
+		output, err := exec.Command(kindKubectl(), "--context", contextName, "-n", "simq-m10", "get", "pods", "-l", "app=simq", "-o", "json").Output()
 		if err == nil {
 			var pods kindPodList
 			if json.Unmarshal(output, &pods) == nil && len(pods.Items) == 3 {
@@ -231,7 +231,7 @@ func waitKindRecreatedPod(t *testing.T, contextName, name, previousUID string) {
 	t.Helper()
 	deadline := time.Now().Add(kindWait)
 	for time.Now().Before(deadline) {
-		output, err := exec.Command("kubectl", "--context", contextName, "-n", "simq-m10", "get", "pod", name, "-o", "json").Output()
+		output, err := exec.Command(kindKubectl(), "--context", contextName, "-n", "simq-m10", "get", "pod", name, "-o", "json").Output()
 		if err == nil {
 			var pod struct {
 				Metadata struct {
@@ -253,8 +253,15 @@ func waitKindRecreatedPod(t *testing.T, contextName, name, previousUID string) {
 func kubectl(t *testing.T, contextName string, arguments ...string) {
 	t.Helper()
 	base := []string{"--context", contextName, "-n", "simq-m10"}
-	output, err := exec.Command("kubectl", append(base, arguments...)...).CombinedOutput()
+	output, err := exec.Command(kindKubectl(), append(base, arguments...)...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("kubectl %s: %v\n%s", strings.Join(arguments, " "), err, output)
 	}
+}
+
+func kindKubectl() string {
+	if configured := os.Getenv("SIMQ_KUBECTL"); configured != "" {
+		return configured
+	}
+	return "kubectl"
 }

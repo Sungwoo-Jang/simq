@@ -27,3 +27,7 @@ alerts:
 .PHONY: kind-integration
 kind-integration:
 	./scripts/kind-integration.sh
+
+.PHONY: qualify-secure
+qualify-secure:
+	./scripts/qualify-secure.sh
